@@ -124,9 +124,9 @@ function card(r, now) {
     </article>`;
   }
 
-  const prompt = `Work on ${OWNER}/${r.name} (${r.url}). Read AGENTS.md, CLAUDE.md and HANDOVER.md where present. ` + (r.now
+  const prompt = `Open ${OWNER}/${r.name} (${r.url}). Read AGENTS.md, CLAUDE.md and HANDOVER.md where present. ` + (r.now
     ? 'Read NOW.md and continue from "Next step". Update NOW.md before ending the session.'
-    : 'Inspect the README, code, recent commits and open pull requests. Summarise the current state and suggest the next concrete action. Create NOW.md in the repository root using these fields: Doing, State, Next step, Blocked by, Updated (YYYY-MM-DD). Base it on verified findings; mark anything uncertain. Add a session bookmark rule to AGENTS.md and CLAUDE.md where present (create AGENTS.md if neither exists), preserving existing instructions: read NOW.md at session start and update it before ending every session. Keep NOW.md current as work progresses.');
+    : 'Inspect the README, code, recent commits and open pull requests. Summarise the current state and suggest the next concrete action. Check whether NOW.md already exists in the repository root; read and update it if present, preserving relevant content, and create it only if missing. Use these fields: Doing, State, Next step, Blocked by, Updated (YYYY-MM-DD). Base it on verified findings; mark anything uncertain. Add a session bookmark rule to AGENTS.md and CLAUDE.md where present (create AGENTS.md if neither exists), preserving existing instructions: read NOW.md at session start and update it before ending every session. Keep NOW.md current as work progresses. Commit and push the bookmark and instruction changes following the repository workflow (use a branch and PR if required), so they are available on GitHub. Present your findings and proposed next action, then wait for my direction before implementing further changes.');
   const retire = `Retire the repo ${OWNER}/${r.name}. First list its open pull requests and ask me what to do with each (merge, close, or leave) before doing anything. Then ask me for a one-line epitaph, write it to NOW.md as "Epitaph: <text>", commit, and archive the repo on GitHub.`;
   const warn = prList.length
     ? `<div class="warn">${r.pullRequests.totalCount} open PR${r.pullRequests.totalCount > 1 ? "s" : ""}: decide before retiring</div>` : "";
