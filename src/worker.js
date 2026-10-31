@@ -124,7 +124,9 @@ function card(r, now) {
     </article>`;
   }
 
-  const resume = `Read NOW.md in ${OWNER}/${r.name} and continue from "Next step".`;
+  const prompt = `Work on ${OWNER}/${r.name} (${r.url}). Read AGENTS.md, CLAUDE.md and HANDOVER.md where present. ` + (r.now
+    ? 'Read NOW.md and continue from "Next step". Update NOW.md before ending the session.'
+    : 'Inspect the README, code, recent commits and open pull requests. Summarise the current state and suggest the next concrete action. Create NOW.md in the repository root using these fields: Doing, State, Next step, Blocked by, Updated (YYYY-MM-DD). Base it on verified findings; mark anything uncertain. Add a session bookmark rule to AGENTS.md and CLAUDE.md where present (create AGENTS.md if neither exists), preserving existing instructions: read NOW.md at session start and update it before ending every session. Keep NOW.md current as work progresses.');
   const retire = `Retire the repo ${OWNER}/${r.name}. First list its open pull requests and ask me what to do with each (merge, close, or leave) before doing anything. Then ask me for a one-line epitaph, write it to NOW.md as "Epitaph: <text>", commit, and archive the repo on GitHub.`;
   const warn = prList.length
     ? `<div class="warn">${r.pullRequests.totalCount} open PR${r.pullRequests.totalCount > 1 ? "s" : ""}: decide before retiring</div>` : "";
@@ -138,7 +140,7 @@ function card(r, now) {
     ${fields}${prs}${warn}
     <footer><span class="age">${days === 0 ? "today" : days + " d ago"}</span>
     <span class="btns"><button class="ghost" data-p="${esc(retire)}" data-l="Retire">Retire</button>
-    ${n ? `<button data-p="${esc(resume)}" data-l="Resume">Resume</button>` : ""}</span></footer>
+    <button data-p="${esc(prompt)}" data-l="Copy prompt">Copy prompt</button></span></footer>
   </article>`;
 }
 
