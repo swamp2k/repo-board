@@ -30,3 +30,14 @@ assert(html.includes("kids loved it, done"));
 assert(html.includes("ask me what to do with each"));
 assert(html.indexOf("Decide") < html.indexOf("Waiting for review"));
 console.log("all tests passed");
+
+// buildBoard gives Nexus the same lanes as the web page
+{
+  const { buildBoard } = await import("../src/worker.js");
+  const now = Date.now();
+  const repo = { name: "x", url: "u", isPrivate: false, isArchived: false, pushedAt: new Date(now).toISOString(), now: { text: "Doing: a\nNext step: b" }, pullRequests: { totalCount: 0, nodes: [] } };
+  const board = buildBoard([repo], now);
+  const lane = board.lanes.find((l) => l.id === "progress");
+  if (board.contractVersion !== 1 || lane.repos[0].nextStep !== "b" || !lane.repos[0].resumePrompt) throw new Error("buildBoard failed");
+  console.log("buildBoard ok");
+}

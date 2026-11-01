@@ -1,5 +1,5 @@
 name = "repo-board"
-main = "src/worker.js"
+main = "src/entry.js"
 compatibility_date = "2026-10-01"
 
 # Secret (not in this file): GITHUB_TOKEN
