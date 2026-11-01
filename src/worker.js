@@ -107,6 +107,30 @@ export function renderBoard(repos, now) {
   }).join("");
 }
 
+// Plain data for Nexus (no HTML). Same lanes, same prompts as the web page.
+export function buildBoard(repos, now) {
+  return {
+    contractVersion: 1,
+    generatedAt: new Date(now).toISOString(),
+    lanes: LANES.map(([id, title]) => ({
+      id, title,
+      repos: repos.filter((r) => laneFor(r, now) === id).map((r) => {
+        const n = parseNow(r.now?.text) || {};
+        const { prompt, retire } = promptsFor(r);
+        return {
+          name: r.name, url: r.url, isPrivate: r.isPrivate,
+          daysSincePush: Math.floor((now - Date.parse(r.pushedAt)) / DAY),
+          doing: n.doing ?? null, state: n.state ?? null, nextStep: n["next step"] ?? null,
+          blockedBy: n["blocked by"] ?? null, epitaph: n.epitaph ?? null, hasNow: !!r.now,
+          openPrs: r.pullRequests.totalCount,
+          prs: r.pullRequests.nodes.map((p) => ({ number: p.number, title: p.title, url: p.url, daysSinceUpdate: Math.floor((now - Date.parse(p.updatedAt)) / DAY) })),
+          resumePrompt: prompt, retirePrompt: retire,
+        };
+      }),
+    })),
+  };
+}
+
 function card(r, now) {
   const days = Math.floor((now - Date.parse(r.pushedAt)) / DAY);
   const n = parseNow(r.now?.text);
@@ -124,10 +148,7 @@ function card(r, now) {
     </article>`;
   }
 
-  const prompt = `Open ${OWNER}/${r.name} (${r.url}). Read AGENTS.md, CLAUDE.md and HANDOVER.md where present. First check the repository root for AGENTS.md and CLAUDE.md (exact uppercase filenames). If neither exists, create both with identical contents. If only one exists, copy its full contents to the other filename. If both exist and differ, explain the differences and propose a merged version preserving useful instructions; wait for my choice before changing either file or continuing implementation. If they are identical, keep them aligned. Preserve existing instructions and include these rules identically in both: read NOW.md at session start, update it before ending every session, and whenever either root instruction file changes, update both identically. Leave nested instruction files unchanged. ` + (r.now
-    ? 'Read NOW.md and continue from "Next step". Update NOW.md before ending the session.'
-    : 'Inspect the README, code, recent commits and open pull requests. Summarise the current state and suggest the next concrete action. Check whether NOW.md already exists in the repository root; read and update it if present, preserving relevant content, and create it only if missing. Use these fields: Doing, State, Next step, Blocked by, Updated (YYYY-MM-DD). Base it on verified findings; mark anything uncertain. Keep NOW.md current as work progresses. Commit and push the bookmark and instruction changes following the repository workflow (use a branch and PR if required), so they are available on GitHub. Present your findings and proposed next action, then wait for my direction before implementing further changes.');
-  const retire = `Retire the repo ${OWNER}/${r.name}. First list its open pull requests and ask me what to do with each (merge, close, or leave) before doing anything. Then ask me for a one-line epitaph, write it to NOW.md as "Epitaph: <text>", commit, and archive the repo on GitHub.`;
+  const { prompt, retire } = promptsFor(r);
   const warn = prList.length
     ? `<div class="warn">${r.pullRequests.totalCount} open PR${r.pullRequests.totalCount > 1 ? "s" : ""}: decide before retiring</div>` : "";
   const fields = n
@@ -142,6 +163,15 @@ function card(r, now) {
     <span class="btns"><button class="ghost" data-p="${esc(retire)}" data-l="Retire">Retire</button>
     <button data-p="${esc(prompt)}" data-l="Copy prompt">Copy prompt</button></span></footer>
   </article>`;
+}
+
+export function promptsFor(r) {
+  const n = parseNow(r.now?.text);
+  const prompt = `Open ${OWNER}/${r.name} (${r.url}). Read AGENTS.md, CLAUDE.md and HANDOVER.md where present. First check the repository root for AGENTS.md and CLAUDE.md (exact uppercase filenames). If neither exists, create both with identical contents. If only one exists, copy its full contents to the other filename. If both exist and differ, explain the differences and propose a merged version preserving useful instructions; wait for my choice before changing either file or continuing implementation. If they are identical, keep them aligned. Preserve existing instructions and include these rules identically in both: read NOW.md at session start, update it before ending every session, and whenever either root instruction file changes, update both identically. Leave nested instruction files unchanged. ` + (r.now
+    ? 'Read NOW.md and continue from "Next step". Update NOW.md before ending the session.'
+    : 'Inspect the README, code, recent commits and open pull requests. Summarise the current state and suggest the next concrete action. Check whether NOW.md already exists in the repository root; read and update it if present, preserving relevant content, and create it only if missing. Use these fields: Doing, State, Next step, Blocked by, Updated (YYYY-MM-DD). Base it on verified findings; mark anything uncertain. Keep NOW.md current as work progresses. Commit and push the bookmark and instruction changes following the repository workflow (use a branch and PR if required), so they are available on GitHub. Present your findings and proposed next action, then wait for my direction before implementing further changes.');
+  const retire = `Retire the repo ${OWNER}/${r.name}. First list its open pull requests and ask me what to do with each (merge, close, or leave) before doing anything. Then ask me for a one-line epitaph, write it to NOW.md as "Epitaph: <text>", commit, and archive the repo on GitHub.`;
+  return { prompt, retire };
 }
 
 function esc(s) {
