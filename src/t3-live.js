@@ -344,7 +344,7 @@ export async function liveSend(request, env, identity, repo, fetcher = fetch) {
   // Confirm the conversation belongs to the verified project before sending anything.
   const details = await tool(fetcher, access.accessToken, mcpSession, "t3_thread_read", { threadId, view: "messages", limit: 1, maxCharsPerItem: 100 });
   if (normalizeThread(details?.thread || details, mapping.projectId).id !== threadId) throw fail(403, "thread_mismatch", "The T3 conversation did not belong to this project");
-  await tool(fetcher, access.accessToken, mcpSession, "t3_thread_send", { threadId, message, mode: "queue", clientRequestId: crypto.randomUUID() });
+  await tool(fetcher, access.accessToken, mcpSession, "t3_thread_send", { threadId, message, mode: "auto", clientRequestId: crypto.randomUUID() });
   return json({ sent: true });
 }
 

@@ -718,7 +718,7 @@ console.log("all tests passed");
   let sent = [];
   const ok = await liveSend(sendRequest(), makeEnv(true), owner, repo, makeFetch(projectId, sent));
   assert.equal((await ok.json()).sent, true);
-  assert.equal(sent.length, 1); assert.equal(sent[0].threadId, "th-1"); assert.equal(sent[0].message, "Go ahead"); assert.equal(sent[0].mode, "queue");
+  assert.equal(sent.length, 1); assert.equal(sent[0].threadId, "th-1"); assert.equal(sent[0].message, "Go ahead"); assert.equal(sent[0].mode, "auto");
   sent = [];
   await assert.rejects(() => liveSend(sendRequest(), makeEnv(true), { sub: "sub-1", email: "reader@example.com" }, repo, makeFetch(projectId, sent)), (e) => e.code === "t3_send_not_allowed");
   await assert.rejects(() => liveSend(sendRequest(), makeEnv(false), owner, repo, makeFetch(projectId, sent)), (e) => e.code === "t3_send_not_permitted");
