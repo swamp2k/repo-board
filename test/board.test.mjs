@@ -710,11 +710,14 @@ console.log("all tests passed");
     const call = JSON.parse(init.body);
     if (call.method === "initialize") return Response.json({ jsonrpc: "2.0", id: call.id, result: { protocolVersion: "2025-06-18" } });
     if (call.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (call.params.name === "t3_project_read") return Response.json({ jsonrpc: "2.0", id: call.id, result: { structuredContent: { project: { id: projectId, workspaceRoot: "/projects/glb-viewer" } } } });
+    if (call.params.name === "t3_project_list") return Response.json({ jsonrpc: "2.0", id: call.id, result: { structuredContent: { projects: listedProjects } } });
     if (call.params.name === "t3_thread_read") return Response.json({ jsonrpc: "2.0", id: call.id, result: { structuredContent: { thread: { threadId: "th-1", projectId: threadProject } } } });
     if (call.params.name === "t3_thread_send") { sent.push(call.params.arguments); return Response.json({ jsonrpc: "2.0", id: call.id, result: { structuredContent: { ok: true } } }); }
     throw Error("unexpected tool " + call.params.name);
   };
   const owner = { sub: "sub-1", email: "owner@example.com" };
+  let listedProjects = [{ id: "mcp:other", workspaceRoot: "/projects/other", repositoryIdentity: { canonicalKey: "github.com/swamp2k/other" } }, { id: projectId, workspaceRoot: "/projects/glb-viewer", repositoryIdentity: { canonicalKey: "github.com/swamp2k/glb-viewer" } }];
   let sent = [];
   const ok = await liveSend(sendRequest(), makeEnv(true), owner, repo, makeFetch(projectId, sent));
   assert.equal((await ok.json()).sent, true);
@@ -725,5 +728,14 @@ console.log("all tests passed");
   await assert.rejects(() => liveSend(sendRequest("wrong"), makeEnv(true), owner, repo, makeFetch(projectId, sent)), (e) => e.code === "csrf_rejected");
   await assert.rejects(() => liveSend(sendRequest(), makeEnv(true), owner, repo, makeFetch("mcp:other", sent)), (e) => e.code === "thread_mismatch");
   assert.equal(sent.length, 0, "nothing is sent when any check fails");
+  // Without a pinned projectId the project is found by its GitHub identity.
+  const autoEnv = { ...makeEnv(true), T3_PROJECTS_JSON: JSON.stringify([{ repoId: repo.id, owner: "swamp2k", name: "glb-viewer" }]) };
+  await liveSend(sendRequest(), autoEnv, owner, repo, makeFetch(projectId, sent));
+  assert.equal(sent.length, 1, "auto-discovered project allows sending");
+  listedProjects = [];
+  await assert.rejects(() => liveSend(sendRequest(), autoEnv, owner, repo, makeFetch(projectId, sent)), (e) => e.code === "t3_project_missing");
+  listedProjects = [{ id: "mcp:a", workspaceRoot: "/a", repositoryIdentity: { canonicalKey: "github.com/swamp2k/glb-viewer" } }, { id: "mcp:b", workspaceRoot: "/b", repositoryIdentity: { canonicalKey: "github.com/swamp2k/glb-viewer" } }];
+  await assert.rejects(() => liveSend(sendRequest(), autoEnv, owner, repo, makeFetch(projectId, sent)), (e) => e.code === "t3_project_ambiguous");
+  assert.equal(sent.length, 1);
   console.log("live send allowlist, operate grant, CSRF and project membership checks ok");
 }

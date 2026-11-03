@@ -31,6 +31,8 @@ export function resolveProject(repo, env) {
   const matches = list.filter((m) => m?.repoId === identity.id);
   if (matches.length !== 1) throw new T3Error(503, "mapping_unavailable", "No unique verified project mapping exists for this repository");
   const m = matches[0];
+  // A mapping without projectId/workspaceRoot is resolved live from T3 by GitHub identity.
+  if (m.owner === identity.owner && m.name === identity.name && m.projectId === undefined && m.workspaceRoot === undefined) return { ...identity, mode, projectId: null, workspaceRoot: null };
   if (m.owner !== identity.owner || m.name !== identity.name || typeof m.projectId !== "string" || !m.projectId || m.projectId.length > 200 || /[\u0000-\u001f]/.test(m.projectId) || typeof m.workspaceRoot !== "string" || !m.workspaceRoot.startsWith("/") || m.workspaceRoot.startsWith("//") || m.workspaceRoot.includes("\\") || m.workspaceRoot.length > 512 || /[\u0000-\u001f]/.test(m.workspaceRoot) || m.workspaceRoot.split("/").some((part) => part === "." || part === "..")) {
     throw new T3Error(503, "mapping_stale", "The configured project mapping does not match the current GitHub repository identity");
   }

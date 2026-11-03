@@ -253,7 +253,7 @@ async function tool(fetcher, token, session, name, args) {
 function normalizedProject(value, mapping) {
   const p = value?.project || value;
   const repo = p?.repositoryIdentity;
-  if (!p || p.id !== mapping.projectId || p.workspaceRoot !== "/projects/glb-viewer" || (repo != null && (typeof repo !== "object" || repo.canonicalKey !== "github.com/swamp2k/glb-viewer" || repo.rootPath !== "/projects/glb-viewer"))) throw fail(403, "project_mismatch", "The T3 project identity did not match the configured repository");
+  if (!p || p.id !== mapping.projectId || p.workspaceRoot !== mapping.workspaceRoot || (repo != null && (typeof repo !== "object" || String(repo.canonicalKey).toLowerCase() !== `github.com/${mapping.owner}/${mapping.name}`.toLowerCase() || repo.rootPath !== mapping.workspaceRoot))) throw fail(403, "project_mismatch", "The T3 project identity did not match the configured repository");
   return { id: mapping.projectId, workspaceRoot: mapping.workspaceRoot };
 }
 
@@ -274,6 +274,21 @@ function normalizeItem(item) {
   return { type: typeof item.type === "string" ? item.type.slice(0, 100) : "unknown", createdBy: typeof item.createdBy === "string" ? item.createdBy.slice(0, 80) : "unknown", text: source.slice(0, MAX_ITEM_CHARS), textTruncated: item.textTruncated === true || source.length > MAX_ITEM_CHARS, at: item.createdAt || item.updatedAt || null };
 }
 
+// Find the T3 project for a repository. A pinned projectId in config is used as-is; otherwise the
+// project is looked up by its GitHub identity, so removing and re-adding the repo in T3 keeps working.
+async function resolveLiveProject(fetcher, token, session, mapping) {
+  if (mapping.projectId) return normalizedProject(await tool(fetcher, token, session, "t3_project_read", { projectId: mapping.projectId }), mapping);
+  const listed = await tool(fetcher, token, session, "t3_project_list", {});
+  const projects = Array.isArray(listed) ? listed : listed?.projects || listed?.items || listed?.data || [];
+  const key = `github.com/${mapping.owner}/${mapping.name}`.toLowerCase();
+  const matches = (Array.isArray(projects) ? projects : []).filter((p) => typeof p?.repositoryIdentity?.canonicalKey === "string" && p.repositoryIdentity.canonicalKey.toLowerCase() === key);
+  if (matches.length === 0) throw fail(404, "t3_project_missing", `${mapping.name} is not added in T3. Add the repository in T3, then retry.`);
+  if (matches.length > 1) throw fail(409, "t3_project_ambiguous", `More than one T3 project points at ${mapping.owner}/${mapping.name}; remove the duplicate in T3.`);
+  const p = matches[0], id = p.id ?? p.projectId;
+  if (typeof id !== "string" || !id || id.length > 200 || /[\u0000-\u001f]/.test(id) || typeof p.workspaceRoot !== "string" || !p.workspaceRoot.startsWith("/") || p.workspaceRoot.length > 512) throw fail(502, "t3_response_invalid", "T3 returned an invalid project");
+  return { id, workspaceRoot: p.workspaceRoot };
+}
+
 function verifiedMapping(env, repo) {
   const canonical = canonicalRepo(repo);
   const map = JSON.parse(env.T3_PROJECTS_JSON || "[]");
@@ -281,7 +296,7 @@ function verifiedMapping(env, repo) {
   const matches = map.filter((m) => m?.repoId === canonical.id);
   if (matches.length !== 1) throw fail(503, "mapping_unavailable", "No unique verified T3 project mapping exists for this repository");
   const mapping = matches[0];
-  if (canonical.id !== "R_kgDOUSfguQ" || canonical.owner !== "swamp2k" || canonical.name !== "glb-viewer" || mapping.owner !== canonical.owner || mapping.name !== canonical.name || typeof mapping.projectId !== "string" || !/^mcp:[0-9a-f-]{36}$/.test(mapping.projectId) || mapping.workspaceRoot !== "/projects/glb-viewer") throw fail(403, "project_mismatch", "Only the verified glb-viewer T3 project is available");
+  if (canonical.id !== "R_kgDOUSfguQ" || canonical.owner !== "swamp2k" || canonical.name !== "glb-viewer" || mapping.owner !== canonical.owner || mapping.name !== canonical.name || (mapping.projectId !== undefined && (typeof mapping.projectId !== "string" || !/^mcp:[0-9a-f-]{36}$/.test(mapping.projectId) || mapping.workspaceRoot !== "/projects/glb-viewer"))) throw fail(403, "project_mismatch", "Only the verified glb-viewer T3 project is available");
   return mapping;
 }
 
@@ -294,14 +309,13 @@ export async function liveRead(request, env, identity, repo, fetcher = fetch) {
   const init = await mcpRequest(fetcher, access.accessToken, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "repo-board", version: "1" } }, mcpSession);
   if (!init || init.protocolVersion !== "2025-06-18") throw fail(502, "t3_version_unsupported", "T3 returned an unsupported conversation protocol version");
   await mcpRequest(fetcher, access.accessToken, "notifications/initialized", undefined, mcpSession);
-  const projectData = await tool(fetcher, access.accessToken, mcpSession, "t3_project_read", { projectId: mapping.projectId });
-  const project = normalizedProject(projectData, mapping);
+  const project = await resolveLiveProject(fetcher, access.accessToken, mcpSession, mapping);
   const cursorValue = new URL(request.url).searchParams.get("cursor");
   const requestedCursor = cursorValue === null ? undefined : Number(cursorValue);
   if (cursorValue !== null && (!/^\d{1,8}$/.test(cursorValue) || !Number.isSafeInteger(requestedCursor))) throw fail(400, "invalid_conversation_page", "Conversation page is invalid");
-  const listed = await tool(fetcher, access.accessToken, mcpSession, "t3_thread_list", { projectId: mapping.projectId, limit: MAX_THREADS, ...(requestedCursor !== undefined ? { cursor: requestedCursor } : {}) });
+  const listed = await tool(fetcher, access.accessToken, mcpSession, "t3_thread_list", { projectId: project.id, limit: MAX_THREADS, ...(requestedCursor !== undefined ? { cursor: requestedCursor } : {}) });
   const page = extractThreads(listed);
-  const threads = page.threads.slice(0, MAX_THREADS).map((raw) => normalizeThread(raw, mapping.projectId));
+  const threads = page.threads.slice(0, MAX_THREADS).map((raw) => normalizeThread(raw, project.id));
   const requested = new URL(request.url).searchParams.get("threadId");
   let selected = null;
   if (requested) {
@@ -312,7 +326,7 @@ export async function liveRead(request, env, identity, repo, fetcher = fetch) {
     if (!Number.isSafeInteger(position) || position < 0 || position > 10_000_000) throw fail(400, "invalid_conversation_page", "Conversation page is invalid");
     const details = await tool(fetcher, access.accessToken, mcpSession, "t3_thread_read", { threadId: requested, view: "messages", limit: MAX_ITEMS, maxCharsPerItem: MAX_ITEM_CHARS, ...(positionValue !== null ? { afterPosition: position } : {}) });
     const raw = details?.thread || details;
-    const normalized = normalizeThread(raw, mapping.projectId);
+    const normalized = normalizeThread(raw, project.id);
     if (normalized.id !== requested) throw fail(403, "thread_mismatch", "The T3 conversation did not belong to this project");
     const items = Array.isArray(details?.items) ? details.items : [];
     selected = { ...normalized, items: items.slice(0, MAX_ITEMS).map(normalizeItem), itemsTruncated: items.length > MAX_ITEMS, nextPosition: Number.isSafeInteger(details?.nextPosition) ? details.nextPosition : null, hasMore: details?.hasMore === true || items.length > MAX_ITEMS, view: "messages" };
@@ -341,9 +355,10 @@ export async function liveSend(request, env, identity, repo, fetcher = fetch) {
   const init = await mcpRequest(fetcher, access.accessToken, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "repo-board", version: "1" } }, mcpSession);
   if (!init || init.protocolVersion !== "2025-06-18") throw fail(502, "t3_version_unsupported", "T3 returned an unsupported conversation protocol version");
   await mcpRequest(fetcher, access.accessToken, "notifications/initialized", undefined, mcpSession);
+  const project = await resolveLiveProject(fetcher, access.accessToken, mcpSession, mapping);
   // Confirm the conversation belongs to the verified project before sending anything.
   const details = await tool(fetcher, access.accessToken, mcpSession, "t3_thread_read", { threadId, view: "messages", limit: 1, maxCharsPerItem: 100 });
-  if (normalizeThread(details?.thread || details, mapping.projectId).id !== threadId) throw fail(403, "thread_mismatch", "The T3 conversation did not belong to this project");
+  if (normalizeThread(details?.thread || details, project.id).id !== threadId) throw fail(403, "thread_mismatch", "The T3 conversation did not belong to this project");
   await tool(fetcher, access.accessToken, mcpSession, "t3_thread_send", { threadId, message, mode: "auto", clientRequestId: crypto.randomUUID() });
   return json({ sent: true });
 }
