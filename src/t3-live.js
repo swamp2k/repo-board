@@ -190,9 +190,9 @@ async function mcpRequest(fetcher, token, method, params, session) {
   const notification = method.startsWith("notifications/");
   const requestId = notification ? null : crypto.randomUUID();
   try { response = await fixedFetch(fetcher, MCP, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", ...(requestId ? { id: requestId } : {}), method, ...(params === undefined ? {} : { params }) }) }); }
-  catch { throw fail(502, "t3_unavailable", "T3 conversations could not be loaded"); }
+  catch { throw fail(502, "t3_unavailable", `T3 conversations could not be loaded (could not reach T3 during ${method}: network or redirect error)`); }
   if (response.status === 401) throw fail(401, "t3_session_expired", "T3 sign-in expired; disconnect and reconnect");
-  if (!response.ok) throw fail(502, "t3_unavailable", "T3 conversations could not be loaded");
+  if (!response.ok) throw fail(502, "t3_unavailable", `T3 conversations could not be loaded (T3 answered HTTP ${response.status} during ${method})`);
   if (notification && [202, 204].includes(response.status)) return null;
   const type = response.headers.get("content-type") || "";
   let text = "";
@@ -236,13 +236,13 @@ async function mcpRequest(fetcher, token, method, params, session) {
     } else payload = JSON.parse(text);
   } catch { throw fail(502, "t3_response_invalid", "T3 returned an invalid conversation response"); }
   if (!notification && payload?.id !== requestId) throw fail(502, "t3_response_invalid", "T3 returned an invalid conversation response");
-  if (payload?.error) throw fail(502, "t3_unavailable", "T3 conversations could not be loaded");
+  if (payload?.error) throw fail(502, "t3_unavailable", `T3 conversations could not be loaded (T3 error during ${method}: ${String(payload.error.message ?? payload.error.code ?? "unknown").replace(/[\u0000-\u001f]/g, " ").slice(0, 120)})`);
   return payload?.result;
 }
 
 async function tool(fetcher, token, session, name, args) {
   const result = await mcpRequest(fetcher, token, "tools/call", { name, arguments: args }, session);
-  if (!result || result.isError) throw fail(502, "t3_unavailable", "T3 conversations could not be loaded");
+  if (!result || result.isError) throw fail(502, "t3_unavailable", `T3 conversations could not be loaded (T3 tool ${name} failed${result?.isError ? ": " + String(result.content?.find((x) => x.type === "text")?.text ?? "no detail").replace(/[\u0000-\u001f]/g, " ").slice(0, 120) : ""})`);
   if (result.structuredContent !== undefined) return result.structuredContent;
   const text = result.content?.find((x) => x.type === "text")?.text;
   if (typeof text === "string") { try { return JSON.parse(text); } catch { /* return text for safe normalizer */ } }

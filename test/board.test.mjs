@@ -666,7 +666,7 @@ console.log("all tests passed");
     return mcpFetch(url, init);
   };
   for (const [status, message] of [[401, "T3 sign-in expired; disconnect and reconnect"], [503, "T3 conversations could not be loaded"]]) {
-    await assert.rejects(() => liveRead(req, env, user, repo, toolsFailure(status)), (error) => error.status === (status === 401 ? 401 : 502) && error.message === message && !error.message.includes("secret"));
+    await assert.rejects(() => liveRead(req, env, user, repo, toolsFailure(status)), (error) => error.status === (status === 401 ? 401 : 502) && error.message.startsWith(message) && !error.message.includes("secret"));
   }
   await assert.rejects(() => liveRead(req, env, user, repo, async (url, init) => {
     if (JSON.parse(init.body).method === "tools/call") throw Error("network-secret-token");
@@ -675,7 +675,7 @@ console.log("all tests passed");
   await assert.rejects(() => liveRead(req, env, user, repo, async (url, init) => {
     if (JSON.parse(init.body).method === "tools/call") throw new DOMException("timeout access_token=private", "TimeoutError");
     return mcpFetch(url, init);
-  }), (error) => error.status === 502 && error.message === "T3 conversations could not be loaded" && !error.message.includes("private"));
+  }), (error) => error.status === 502 && error.message.startsWith("T3 conversations could not be loaded") && !error.message.includes("private"));
   await assert.rejects(() => liveRead(req, env, user, repo, async (url, init) => {
     const call = JSON.parse(init.body);
     if (call.params?.name === "t3_thread_list") return Response.json({ jsonrpc: "2.0", id: "wrong-id", result: {} });
