@@ -63,6 +63,14 @@ async function safeOAuthFetch(fetcher, url, init) {
   return response;
 }
 
+// Registration step only: report which sub-step failed (safe codes, no upstream text) so a failed sign-in can be diagnosed.
+async function registerFetch(fetcher, url, init) {
+  let response;
+  try { response = await fixedFetch(fetcher, url, init); } catch (e) { throw fail(502, "t3_register_unreachable", `T3 sign-in could not be completed (could not reach T3 registration: ${e?.name === "TimeoutError" ? "timeout" : e?.name === "AbortError" ? "aborted" : "network or redirect error"})`); }
+  if (!response.ok) throw fail(502, "t3_register_rejected", `T3 sign-in could not be completed (T3 registration answered HTTP ${response.status})`);
+  return response;
+}
+
 async function safeJson(response, maxBytes = 32_000) {
   const declared = Number(response.headers.get("content-length") || 0);
   if (declared > maxBytes) throw fail(502, "t3_oauth_unavailable", "T3 sign-in could not be completed");
@@ -90,9 +98,9 @@ async function begin(request, env, identity, fetcher) {
   const browserSession = await storeCall(stub, "read", { sid, subject: identity.sub });
   if (!body || !browserSession.csrf || browserSession.csrf !== body.csrf || body.csrf !== request.headers.get("x-repo-board-csrf") || !cookieValue(request) || cookieValue(request) !== browserSession.sid) throw fail(403, "csrf_rejected", "Request could not be verified");
   const callback = `${origin}/api/t3/auth/callback`;
-  const client = await safeOAuthFetch(fetcher, REGISTER, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify({ client_name: "Repo Board read-only pilot", redirect_uris: [callback], grant_types: ["authorization_code"], response_types: ["code"], token_endpoint_auth_method: "none" }) });
+  const client = await registerFetch(fetcher, REGISTER, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify({ client_name: "Repo Board read-only pilot", redirect_uris: [callback], grant_types: ["authorization_code"], response_types: ["code"], token_endpoint_auth_method: "none" }) });
   const clientInfo = await safeJson(client);
-  if (!clientInfo || typeof clientInfo.client_id !== "string" || !clientInfo.client_id || clientInfo.client_id.length > 512) throw fail(502, "t3_oauth_unavailable", "T3 sign-in could not be completed");
+  if (!clientInfo || typeof clientInfo.client_id !== "string" || !clientInfo.client_id || clientInfo.client_id.length > 512) throw fail(502, "t3_register_invalid", "T3 sign-in could not be completed (T3 registration reply had no client id)");
   const verifier = random(48), state = random(32);
   const challenge = b64url(await sha256(verifier));
   const pending = { state, verifier, sid, subject: identity.sub, clientId: clientInfo.client_id, callback, issuer: T3_ISSUER, expiresAt: Date.now() + 5 * 60_000 };
