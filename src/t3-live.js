@@ -66,7 +66,8 @@ async function safeOAuthFetch(fetcher, url, init) {
 // Registration step only: report which sub-step failed (safe codes, no upstream text) so a failed sign-in can be diagnosed.
 async function registerFetch(fetcher, url, init) {
   let response;
-  try { response = await fixedFetch(fetcher, url, init); } catch (e) { throw fail(502, "t3_register_unreachable", `T3 sign-in could not be completed (could not reach T3 registration: ${e?.name === "TimeoutError" ? "timeout" : e?.name === "AbortError" ? "aborted" : "network or redirect error"})`); }
+  try { response = await fetcher(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(10_000) }); } catch (e) { throw fail(502, "t3_register_unreachable", `T3 sign-in could not be completed (could not reach T3 registration: ${e?.name === "TimeoutError" ? "timeout" : e?.name === "AbortError" ? "aborted" : "network or redirect error"})`); }
+  if (response.status >= 300 && response.status < 400) { let host = "unknown"; try { host = new URL(response.headers.get("location") || "", url).hostname; } catch { /* keep unknown */ } throw fail(502, "t3_register_redirected", `T3 sign-in could not be completed (T3 registration was redirected, HTTP ${response.status}, to ${host})`); }
   if (!response.ok) throw fail(502, "t3_register_rejected", `T3 sign-in could not be completed (T3 registration answered HTTP ${response.status})`);
   return response;
 }
