@@ -303,6 +303,7 @@ console.log("all tests passed");
   const document = {
     getElementById(id) { if (!elements.has(id)) elements.set(id, new Element(id)); return elements.get(id); },
     createElement() { return new Element(); },
+    createTextNode(text) { const node = new Element(); node.textContent = text; return node; },
     addEventListener(name, callback) { (documentListeners[name] ||= []).push(callback); },
     querySelector() { return null; },
   };
