@@ -23,7 +23,8 @@ const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-"
 const json = (value, status = 200, headers = {}) => new Response(JSON.stringify(value), { status, headers: { ...JSON_HEADERS, ...headers } });
 const cookieValue = (request) => (request.headers.get("cookie") || "").split(";").map((p) => p.trim()).find((p) => p.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1) || "";
 const cookieHeader = (sid, age = 86400) => `${COOKIE}=${sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${age}`;
-const fixedFetch = (fetcher, url, init) => fetcher(url, { ...init, redirect: "error", signal: AbortSignal.timeout(10_000) });
+// Cloudflare Workers does not support redirect: "error" (fetch throws). Use "manual"; any 3xx is then rejected as a non-OK response.
+const fixedFetch = (fetcher, url, init) => fetcher(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(10_000) });
 
 function boardOrigin(env, request) {
   let configured;

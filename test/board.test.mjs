@@ -588,7 +588,7 @@ console.log("all tests passed");
   const calls = [];
   const mcpFetch = async (url, init) => {
     assert.equal(url, "https://t3.jeppesen.cc/mcp");
-    assert.equal(init.redirect, "error");
+    assert.equal(init.redirect, "manual");
     assert.equal(new Headers(init.headers).get("authorization"), "Bearer server-token");
     const body = JSON.parse(init.body); calls.push(body);
     if (body.method === "notifications/initialized") { assert.equal(body.id, undefined); return new Response(null, { status: 202 }); }
