@@ -281,9 +281,10 @@ async function resolveLiveProject(fetcher, token, session, mapping) {
   const listed = await tool(fetcher, token, session, "t3_project_list", {});
   const projects = Array.isArray(listed) ? listed : listed?.projects || listed?.items || listed?.data || [];
   const key = `github.com/${mapping.owner}/${mapping.name}`.toLowerCase();
-  const matches = (Array.isArray(projects) ? projects : []).filter((p) => typeof p?.repositoryIdentity?.canonicalKey === "string" && p.repositoryIdentity.canonicalKey.toLowerCase() === key);
+  const gone = (p) => p?.deletedAt || p?.archivedAt || p?.archived === true || p?.deleted === true || ["deleted", "archived", "removed"].includes(String(p?.status || p?.state || "").toLowerCase());
+  const matches = (Array.isArray(projects) ? projects : []).filter((p) => typeof p?.repositoryIdentity?.canonicalKey === "string" && p.repositoryIdentity.canonicalKey.toLowerCase() === key && !gone(p));
   if (matches.length === 0) throw fail(404, "t3_project_missing", `${mapping.name} is not added in T3. Add the repository in T3, then retry.`);
-  if (matches.length > 1) throw fail(409, "t3_project_ambiguous", `More than one T3 project points at ${mapping.owner}/${mapping.name}; remove the duplicate in T3.`);
+  if (matches.length > 1) throw fail(409, "t3_project_ambiguous", `More than one T3 project points at ${mapping.owner}/${mapping.name}: ${matches.slice(0, 5).map((p) => `${String(p.title || p.name || "untitled").slice(0, 60)} at ${String(p.workspaceRoot || "?").slice(0, 120)}`).join("; ")}. Remove the duplicate in T3.`);
   const p = matches[0], id = p.id ?? p.projectId;
   if (typeof id !== "string" || !id || id.length > 200 || /[\u0000-\u001f]/.test(id) || typeof p.workspaceRoot !== "string" || !p.workspaceRoot.startsWith("/") || p.workspaceRoot.length > 512) throw fail(502, "t3_response_invalid", "T3 returned an invalid project");
   return { id, workspaceRoot: p.workspaceRoot };
