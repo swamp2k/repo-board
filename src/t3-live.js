@@ -281,7 +281,7 @@ function verifiedMapping(env, repo) {
   const matches = map.filter((m) => m?.repoId === canonical.id);
   if (matches.length !== 1) throw fail(503, "mapping_unavailable", "No unique verified T3 project mapping exists for this repository");
   const mapping = matches[0];
-  if (canonical.id !== "R_kgDOUSfguQ" || canonical.owner !== "swamp2k" || canonical.name !== "glb-viewer" || mapping.owner !== canonical.owner || mapping.name !== canonical.name || mapping.projectId !== "mcp:6ccdf28e-d941-4b71-a636-a344020b5643" || mapping.workspaceRoot !== "/projects/glb-viewer") throw fail(403, "project_mismatch", "Only the verified glb-viewer T3 project is available");
+  if (canonical.id !== "R_kgDOUSfguQ" || canonical.owner !== "swamp2k" || canonical.name !== "glb-viewer" || mapping.owner !== canonical.owner || mapping.name !== canonical.name || typeof mapping.projectId !== "string" || !/^mcp:[0-9a-f-]{36}$/.test(mapping.projectId) || mapping.workspaceRoot !== "/projects/glb-viewer") throw fail(403, "project_mismatch", "Only the verified glb-viewer T3 project is available");
   return mapping;
 }
 
