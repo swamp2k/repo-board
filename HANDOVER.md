@@ -50,3 +50,31 @@ Repos glb-viewer, star-rewards and Ebeltoft3D already have NOW.md plus a CLAUDE.
 - Keep it simple: one Worker, no database unless a feature truly needs one.
 - No "should work": run `npm test` and check the live page before calling anything done.
 - Update NOW.md at the end of every session.
+
+## 2026-11-03 — optional T3 mock slice
+
+Feature branch `feat/t3-integration` adds `src/t3.js` (mock API/storage adapter),
+`src/t3-ui.js` (card-opened dialog), GitHub database IDs for identity, and API/client
+tests. Existing board, prompts and Nexus contract remain intact. See README for
+bindings, authentication and the investigation evidence. This supersedes no
+previous deployment record: **this feature has not been deployed**.
+
+T3 is version 0.1.6. Native MCP supports persistent projects and threads, activity
+reads, send/interrupt and pending questions (not approval handling). Public `/mcp` rejects an unauthenticated
+initialize with 401 `invalid_mcp_credential`. Public root 200 is not proof of
+Cloudflare Access protection. No authenticated Worker→T3 request or live pilot
+was performed. The preferred live architecture reuses native project/thread
+persistence, with explicitly verified GitHub-ID→project/workspace mapping.
+
+No glb-viewer project appeared in the actual project list; no matching checkout
+was found under /home/t3code within four levels. Do not guess its directory. Next:
+identify/prepare and verify the pilot checkout/project, verify Access JWT policy
+for board APIs, obtain a scoped server-side MCP client credential using the secure
+secret flow, implement/test authenticated transport, then perform the user's
+read-only pilot. Do not reuse the separate mock HTTP Basic password as T3 auth.
+
+Mock limitations: no real agents/status/approvals/PR links/streaming; stopped mock
+sessions cannot resume; sequential retry idempotency only; KV read-modify-write
+can lose concurrent updates and is unsuitable for live execution associations.
+Messages are stored only for the simulated demo. Mobile CSS and native dialog
+are present; real mobile layout/keyboard acceptance remains unverified.
