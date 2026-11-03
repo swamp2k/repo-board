@@ -13,7 +13,7 @@ ACCESS_TEAM_DOMAIN = "https://hadus.cloudflareaccess.com"
 ACCESS_AUD = "bf03f14306385ca61975a03856fc2b31092c884681f46f70556cd0ba46c01290"
 T3_SEND_EMAILS = "martin@jeppesen.cc,swamp2k@gmail.com"
 ACCESS_ALLOWED_EMAILS = "martin@jeppesen.cc,swamp2k@gmail.com,bderandi@gmail.com"
-T3_PROJECTS_JSON = '[{"repoId":"R_kgDOUSfguQ","owner":"swamp2k","name":"glb-viewer","preferRoot":"/home/t3code/glb-viewer"}]'
+T3_PROJECTS_JSON = '[{"repoId":"R_kgDOUSfguQ","owner":"swamp2k","name":"glb-viewer"}]'
 
 [observability]
 redact_query_string = true

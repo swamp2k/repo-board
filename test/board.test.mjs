@@ -736,8 +736,9 @@ console.log("all tests passed");
   await assert.rejects(() => liveSend(sendRequest(), autoEnv, owner, repo, makeFetch(projectId, sent)), (e) => e.code === "t3_project_missing");
   listedProjects = [{ id: "mcp:a", workspaceRoot: "/a", repositoryIdentity: { canonicalKey: "github.com/swamp2k/glb-viewer" } }, { id: "mcp:b", workspaceRoot: "/b", repositoryIdentity: { canonicalKey: "github.com/swamp2k/glb-viewer" } }];
   await assert.rejects(() => liveSend(sendRequest(), autoEnv, owner, repo, makeFetch(projectId, sent)), (e) => e.code === "t3_project_ambiguous");
-  const preferEnv = { ...autoEnv, T3_PROJECTS_JSON: JSON.stringify([{ repoId: repo.id, owner: "swamp2k", name: "glb-viewer", preferRoot: "/b" }]) };
-  await assert.rejects(() => liveSend(sendRequest(), preferEnv, owner, repo, makeFetch("mcp:a", sent)), (e) => e.code === "thread_mismatch", "preferRoot picks /b, so a thread of /a is refused");
-  assert.equal(sent.length, 1);
+  listedProjects = [{ id: "mcp:a", createdAt: "2026-01-01T00:00:00Z", workspaceRoot: "/a", repositoryIdentity: { canonicalKey: "github.com/swamp2k/glb-viewer" } }, { id: "mcp:b", createdAt: "2026-11-01T00:00:00Z", workspaceRoot: "/b", repositoryIdentity: { canonicalKey: "github.com/swamp2k/glb-viewer" } }];
+  await assert.rejects(() => liveSend(sendRequest(), autoEnv, owner, repo, makeFetch("mcp:a", sent)), (e) => e.code === "thread_mismatch", "the newest duplicate (/b) is used, so a thread of the older /a is refused");
+  await liveSend(sendRequest(), autoEnv, owner, repo, makeFetch("mcp:b", sent));
+  assert.equal(sent.length, 2, "sending into the newest duplicate works");
   console.log("live send allowlist, operate grant, CSRF and project membership checks ok");
 }
