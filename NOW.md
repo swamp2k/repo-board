@@ -1,6 +1,6 @@
 ## Where I left off
-Doing: Add AGENTS.md/CLAUDE.md alignment to both Copy prompt variants
-State: Committed and deployed (e97244096c6048439685911bd1eda4d9). Both prompts check root uppercase filenames, create identical files if neither exists, copy if only one exists, propose a merge and wait for Martin if contents differ, and keep future updates identical. Nested instructions remain unchanged. npm test and targeted checks of both prompt variants pass.
-Next step: Merge, run npx wrangler deploy, then deploy Nexus.
-Blocked by: authenticated live clipboard verification requires Martin's login.
-Updated: 2026-11-01
+Doing: Prepared optional T3 mock slice for review on feat/t3-integration.
+State: Mock-only card dialog/API and persistent demo adapter implemented; npm test, JavaScript syntax checks and git diff --check pass. Existing Copy Prompt/lane/Nexus contract tests pass. T3 CLI and environment report 0.1.6; actual public /mcp rejects unauthenticated initialize with 401 invalid_mcp_credential. Native projects/threads are preferred for live persistence. No deployment or infrastructure changes. AGENTS.md and CLAUDE.md remain identical.
+Next step: Review the feature PR. Identify or prepare and verify the glb-viewer checkout/T3 project, verify board Access JWT authorization, then configure scoped server-side MCP credentials and implement authenticated live transport before the read-only pilot.
+Blocked by: No glb-viewer project in the verified T3 project list; no matching checkout found under /home/t3code within four levels. Worker-to-T3 auth and Cloudflare Access coverage are unverified. Mock acceptance is not live acceptance; mobile browser layout, real approvals and streaming remain unverified. Mock KV updates are not transactionally safe for concurrent use.
+Updated: 2026-11-03

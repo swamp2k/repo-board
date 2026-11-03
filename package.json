@@ -1,4 +1,4 @@
 {
   "type": "module",
-  "scripts": { "test": "node test/board.test.mjs" }
+  "scripts": { "test": "node test/board.test.mjs && node test/t3-ui.test.mjs" }
 }
