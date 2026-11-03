@@ -1,0 +1,34 @@
+name = "repo-board"
+main = "src/entry.js"
+compatibility_date = "2026-10-01"
+account_id = "98b26d7882ddf77fcd45529f35b11202"
+workers_dev = true
+# Keep unprotected version URLs disabled; the normal workers.dev URL remains Access-protected.
+preview_urls = false
+
+[vars]
+T3_MODE = "live"
+BOARD_ORIGIN = "https://repo-board.sr-goodjob.workers.dev"
+ACCESS_TEAM_DOMAIN = "https://hadus.cloudflareaccess.com"
+ACCESS_AUD = "bf03f14306385ca61975a03856fc2b31092c884681f46f70556cd0ba46c01290"
+ACCESS_ALLOWED_EMAILS = "martin@jeppesen.cc,swamp2k@gmail.com,bderandi@gmail.com"
+T3_PROJECTS_JSON = '[{"repoId":"R_kgDOUSfguQ","owner":"swamp2k","name":"glb-viewer","projectId":"mcp:6ccdf28e-d941-4b71-a636-a344020b5643","workspaceRoot":"/projects/glb-viewer"}]'
+
+[observability]
+redact_query_string = true
+
+[observability.logs]
+enabled = false
+
+[[durable_objects.bindings]]
+name = "T3_AUTH_STORE"
+class_name = "T3AuthStore"
+
+[[migrations]]
+tag = "t3-auth-store-v1"
+new_sqlite_classes = ["T3AuthStore"]
+
+[[ratelimits]]
+name = "T3_RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 60, period = 60 }
