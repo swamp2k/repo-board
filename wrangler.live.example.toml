@@ -1,0 +1,30 @@
+# Copy these live-only values into the deployment's normal wrangler.toml after
+# supplying the verified board Access values and an account-unique numeric rate-limit
+# namespace ID. This example does not provision or deploy anything.
+name = "repo-board"
+main = "src/entry.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+T3_MODE = "live"
+BOARD_ORIGIN = "https://<board-hostname>"
+ACCESS_TEAM_DOMAIN = "https://<verified-team>.cloudflareaccess.com"
+ACCESS_AUD = "<verified-board-access-audience>"
+ACCESS_ALLOWED_EMAILS = "<approved-email>"
+T3_PROJECTS_JSON = '[{"repoId":"R_kgDOUSfguQ","owner":"swamp2k","name":"glb-viewer","projectId":"mcp:6ccdf28e-d941-4b71-a636-a344020b5643","workspaceRoot":"/projects/glb-viewer"}]'
+
+[[durable_objects.bindings]]
+name = "T3_AUTH_STORE"
+class_name = "T3AuthStore"
+
+[[migrations]]
+tag = "t3-auth-store-v1"
+new_sqlite_classes = ["T3AuthStore"]
+
+# Workers Rate Limiting binding. Choose an account-unique numeric ID to avoid sharing counters.
+[[ratelimits]]
+name = "T3_RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 60, period = 60 }
+
+# Secret (never commit): GITHUB_TOKEN

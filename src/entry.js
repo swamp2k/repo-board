@@ -1,8 +1,15 @@
 // Worker entry: the web page (worker.js) plus the private entrypoint Nexus binds to.
-import { WorkerEntrypoint } from "cloudflare:workers";
+import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import web, { buildBoard, loadRepos } from "./worker.js";
+import { T3AuthStore as T3AuthStoreCore } from "./t3-live.js";
 
 export default web;
+
+export class T3AuthStore extends DurableObject {
+  async fetch(request) {
+    return new T3AuthStoreCore(this.ctx).fetch(request);
+  }
+}
 
 export class NexusIntegration extends WorkerEntrypoint {
   async getBoard() {

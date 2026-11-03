@@ -4,3 +4,5 @@ compatibility_date = "2026-10-01"
 
 # Secret (not in this file): GITHUB_TOKEN
 #   npx wrangler secret put GITHUB_TOKEN
+
+# Optional live T3 bindings and migration: see wrangler.live.example.toml.

@@ -13,43 +13,44 @@ Cards fade the longer they go untouched. "Resume" copies a prompt to paste into 
 
 It only reads from GitHub. It never writes to your repos.
 
-## Optional T3 workspace panel (mock first)
+## Optional T3 workspace panel
 
-The T3 panel is disabled unless `T3_MODE` is explicitly set. `T3_MODE=mock` enables a clearly labeled simulator; it does not contact T3. Conversations and activity are stored in browser `localStorage`, so they persist across panel close and page reload in that browser only. They are not shared across browsers and are not server durable. Mock projects and workspace names are synthetic (`mock-project-<GitHub ID>` and `/mock/<owner>/<repo>`).
+The T3 panel has two explicit modes. `T3_MODE=mock` is a simulator; it does not contact T3 and keeps simulated conversations in this browser's `localStorage`. `T3_MODE=live` enables native T3 OAuth and a read-only conversation browser for the verified `swamp2k/glb-viewer` project only. Other repositories never get a live T3 button. The live panel can list conversations and read a selected conversation. It has no live send, resume, cancel, create, or agent-launch operation.
 
-The panel starts new mock conversations with a read-only inspection prompt. It asks the agent to read the root `AGENTS.md`, `CLAUDE.md`, `NOW.md`, and `HANDOVER.md` files when present, inspect recent code, report current state and uncertainty, and suggest one safe next action. It forbids file changes, commits, pushes, merges, releases, deployments, and launching another agent. The existing Copy Prompt text is unchanged.
+### Live access requirements
 
-### T3 facts and limits verified for this slice
+Live mode fails closed until all of these deployment values and bindings exist:
 
-- The installed T3 CLI/MCP version is 0.1.6. Verified MCP capabilities include project listing/reading, thread listing/reading/sending/launching/interruption, and snapshots/activity polling. No event subscription was verified. Pending questions are visible, but no verified tool answers approvals.
-- The CLI advertises HTTP/WebSocket and scoped bearer sessions; the remote API and authentication contract have not been verified. The adapter therefore does not connect to a live endpoint. `T3_MODE=live` validates a configured repo/project mapping, then returns a clear `live_transport_unavailable` error.
-- No registered `glb-viewer` T3 project, matching local workspace under `/home/t3code`, or linked environment was found. No pilot mapping is included.
-- Existing Cloudflare Access policy is unverified. Every `/api/t3` request, including reads, requires a verified Access JWT and explicit allowed email or subject. The Worker checks issuer, audience, expiry, signature via the Access JWKS, foreign-Origin rejection on reads, and exact request origin plus a JSON custom header on writes. Missing auth config fails closed. Do not substitute an email header or add a local authentication bypass.
-- On 2026-11-03 the unauthenticated HTTPS request to `https://t3.jeppesen.cc/` returned HTTP 200 without redirect. This root-page observation does not establish Access protection or API authorization.
+- Existing Cloudflare Access protection for the board, with `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, and an approved email or subject allowlist. The OAuth callback also requires the same signed Access identity.
+- `BOARD_ORIGIN`, the fixed HTTPS origin of the board. HTTP is allowed only for `localhost`, `127.0.0.1`, or `[::1]` during loopback development. This is used to construct the exact OAuth redirect and reject requests with a different host or origin.
+- `T3_AUTH_STORE`, a Durable Object scoped by a hash of the verified Access subject and a random browser cookie. Each browser gets an independent opaque Secure, HttpOnly, SameSite=Lax cookie and CSRF token. The object stores that browser's short-lived single-use PKCE transaction and native T3 access token. No live messages or tokens are stored in browser storage.
+- `T3_RATE_LIMITER`, a Workers Rate Limiting binding. Missing or failed rate limiting blocks live OAuth and read requests.
+- `T3_PROJECTS_JSON`, the server-side mapping shown in `wrangler.live.example.toml`. It pins GitHub's verified node ID `R_kgDOUSfguQ` to T3 project `mcp:6ccdf28e-d941-4b71-a636-a344020b5643` and workspace `/projects/glb-viewer`. T3 project/thread responses are checked against this mapping before messages are returned.
 
-### Mock configuration
+The Worker registers a public OAuth client with T3, uses authorization code + S256 PKCE, and exchanges codes only at the fixed `https://t3.jeppesen.cc/oauth/mcp/token` endpoint. Every callback must contain exactly one `iss` parameter equal to `https://t3.jeppesen.cc`; a validated OAuth error callback consumes its pending state without exposing T3's error text. T3's approval page determines the granted scope; the Worker saves a token only when the returned scope is exactly `orchestration:read`. Any broader or missing scope is rejected. T3 grants read access across its environment; Repo Board enforces the narrower glb-viewer restriction itself. The token expiry comes from `expires_in`; there is no refresh token flow. Disconnect deletes the board's local credential. To revoke the native T3 grant, use T3's Sharing & Access settings.
 
-For API-backed local panel use, add `T3_MODE=mock`, the existing read-only `GITHUB_TOKEN`, and Access values copied from a verified Cloudflare Access application to `.dev.vars` (do not commit that file):
+The MCP transport is fixed to `https://t3.jeppesen.cc/mcp` and allowlists only `t3_project_read`, `t3_thread_list`, and `t3_thread_read`. Project repository identity is checked against T3's `repositoryIdentity.canonicalKey` and `rootPath`, when present. Native thread list/read envelopes are normalized by their `threadId`, `items`, `nextCursor`, `nextPosition`, and `hasMore` fields. Requests limit a page to 50 conversations or 100 message items and 10,000 characters per item; the panel exposes Load more controls and labels truncated item text. Redirects, arbitrary URLs, browser-supplied paths, and every write/agent-control action are rejected. No D1 database or T3 project/thread is created by this feature.
 
-```dotenv
-T3_MODE=mock
-ACCESS_TEAM_DOMAIN=https://<verified-team>.cloudflareaccess.com
-ACCESS_AUD=<verified-application-audience>
-ACCESS_ALLOWED_EMAILS=<approved-email>
-# Or use ACCESS_ALLOWED_SUBJECTS=<approved-subject-id> instead.
-```
+### Local browser evaluation
 
-Run `npx wrangler dev` after Wrangler is available. The local panel's API requests intentionally fail closed unless they carry a valid Access assertion for the configured team and audience. Wrangler's local Access identity simulation is not treated as a signed JWT. The test suite injects a trusted authentication function for API tests; that seam is code-only and cannot be enabled by environment configuration. The current checkout has no verified Access values, so an authenticated browser session has not been demonstrated.
+1. For a UI preview, set `T3_MODE=live`, `BOARD_ORIGIN=http://localhost:8787`, and local Access settings in private `.dev.vars`; run `npx wrangler dev --port 8787`. The glb-viewer card and read-only panel render locally.
+2. Local requests still require a real signed Cloudflare Access JWT, the Durable Object binding, and a rate limiter. The Worker does not simulate or bypass Access, so a plain local browser session cannot complete OAuth or read conversations. To complete those steps, use an already Access-protected HTTPS board preview with its origin in `BOARD_ORIGIN`, verified Access values, and configured bindings.
+3. On that protected preview, select **glb-viewer → T3 conversations** and choose **Connect to T3**. Approve exactly read-only access on T3's approval page. The app returns to the board and reopens the glb-viewer panel; it shows the conversation list and loads messages only after selecting a conversation.
+4. Use **Disconnect** to remove the board's local stored credential. Revoke the T3 grant separately in T3 Sharing & Access if needed.
 
-To evaluate the browser panel, authenticate through an already verified Access protected preview and set `T3_MODE=mock` there. Do not set `T3_MODE=live`, create T3 projects/threads, provision a database, deploy, or use guessed endpoints as part of mock setup. This slice uses local browser storage and adds no D1 binding or invented database ID.
+This checkout has not completed a real OAuth exchange or real conversation read. The Workers configuration example is illustrative and contains a numeric sample rate-limit namespace ID (`1001`); choose an account-unique numeric ID before use to avoid sharing counters with another Worker. It does not provision a rate-limit namespace or deploy anything. Never configure a localhost redirect in production. OAuth permits HTTP redirects only for loopback development hosts.
 
-Future live activation requires all of the following first:
+### Verification and pilot status
 
-1. Verify the Access application, issuer/team domain, audience, and approved email/subject policy.
-2. Verify the remote T3 API, authentication, polling/reconnect behavior, and project/thread association operations with current first party documentation or an approved integration environment.
-3. Configure a server owned mapping in `T3_PROJECTS_JSON`, with exactly one entry per durable GitHub repository ID and matching canonical owner, current repo name, T3 project ID, and absolute workspace root. The Worker checks the mapping against the current GitHub result. Browser requests only contain the GitHub repo ID, never a path.
-4. Decide on server durable conversation persistence (for example a deliberately configured D1 binding/migration) before expecting conversations to follow the user across devices. The current localStorage persistence is browser scoped.
-5. The read-only pilot is authorized once the existing prerequisites are verified: Access setup and identity policy, supported T3 transport/authentication, and a verified project/workspace mapping. This does not authorize writes or non-read-only actions. Do not request another authorization for that read-only pilot. Deployment is never automatic and is outside this authorization.
+- `npm test` passes, including native response fixtures, Access verification, state/issuer/browser binding, read-only isolation, pagination, and UI races.
+- Wrangler 4.157.0 dry-run builds pass for both the disabled default configuration and the live example. No upload or deployment was performed.
+- Browser checks at 320px and 1280px pass for layout, conversation selection, Escape, close/reopen selection restore, and disconnect. These used injected UI test responses, not authenticated T3 data.
+- The real T3 registration endpoint returned HTTP 201. Anonymous MCP access returns 401. An authenticated OAuth approval and real conversation read remain unverified.
+- The deployed Repo Board Worker was inspected read-only: only `GITHUB_TOKEN` is bound. It has no live T3 configuration, credential store, or rate limiter. The existing board URL redirects to Cloudflare Access login.
+
+The next acceptance step requires approval for a read-only pilot deployment behind the board's existing Access protection, with its verified identity allowlist, the auth-store migration, and a rate-limit binding. Then sign in through T3 and approve Read only. No new Cloudflare Access application for T3 is required by this approach.
+
+Rollback: disable `T3_MODE` and revoke the Repo Board grant in T3's Sharing & Access settings. Disconnect removes this browser's board credential but does not revoke the native grant. Retain the private auth namespace until cleanup is explicitly approved; disabling the feature does not delete infrastructure.
 
 ## Deploy (once)
 

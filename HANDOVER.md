@@ -1,14 +1,17 @@
 # Repo Board — handover
 
 ## What it is
-A kanban-style board over all of swamp2k's GitHub repos. One card per repo. One Cloudflare Worker, no database, read-only against GitHub (one GraphQL call per page load, cached 60 s).
+A kanban-style board over all of swamp2k's GitHub repos. One card per repo. One Cloudflare Worker, read-only against GitHub (one GraphQL call per page load, cached 60 s). Optional live T3 OAuth credentials and PKCE state use a Durable Object scoped by verified Access subject plus browser-cookie hash; T3 continues to own conversations.
 
 Purpose: Martin keeps losing track of what he was doing inside each project. Each repo carries a `NOW.md` "where I left off" bookmark; the board shows those bookmarks and sorts repos into lanes.
 
 ## Files
-- `src/worker.js` — the whole Worker (data fetch, lane rules, HTML)
+- `src/worker.js` — board Worker (data fetch, lane rules, HTML, API routing)
+- `src/t3-live.js` — native T3 OAuth, browser-session-scoped Durable Object storage handler, and allowlisted read-only MCP client
+- `src/entry.js` — Nexus entrypoint and exported `T3AuthStore` Durable Object class
 - `test/board.test.mjs` — lane and rendering tests, run with `npm test`
-- `wrangler.toml` — Worker config. Secret `GITHUB_TOKEN` is set with `wrangler secret put`, never committed
+- `wrangler.toml` — disabled-by-default Worker config. Secret `GITHUB_TOKEN` is set with `wrangler secret put`, never committed.
+- `wrangler.live.example.toml` — live-only variables and rate-limit binding example; it has placeholders and is not deploy-ready.
 - `README.md` — deploy steps
 
 ## Lanes (rules live in `laneFor`)
@@ -39,14 +42,17 @@ Repos glb-viewer, star-rewards and Ebeltoft3D already have NOW.md plus a CLAUDE.
 ## Status
 - Version 1 is deployed and works against real GitHub (Martin's screenshot, 2026-10-31).
 - Version 2 (Decide lane, Retire, Graveyard) was previously verified locally but deployment status is not confirmed here; do not deploy automatically.
-- `feat/t3-workspace-integration` adds an optional mock-first T3 panel and a fail-closed API boundary. The mock adapter does not call T3. Mock threads/activity persist only in this browser's localStorage. Tests execute the injectable client and cover opaque repo IDs, stale/duplicate mappings, JWT verification, authorization/CSRF, repo isolation and async switching, idempotent mock create, reload selection, retry/failure states, exact prompt and Nexus v1 compatibility, fail-closed modes, and responsive dialog behavior.
-- Cloudflare Access configuration and policy remain unverified. Live T3 endpoint/auth contract, project mapping, and durable server conversation storage remain unresolved. No live acceptance test, deployment, D1 binding, or T3 resource creation was performed. On 2026-11-03, `https://t3.jeppesen.cc/` returned HTTP 200 without redirect when probed unauthenticated; this does not establish Access protection or API authorization.
+- The mock adapter does not call T3. Mock threads/activity persist only in this browser's `localStorage`. Live mode implements public-client OAuth with S256 PKCE, exact read-only scope and callback-issuer checks, and browser-specific opaque sessions isolated by the Access subject and cookie hash. MCP reads are fixed to `swamp2k/glb-viewer` and use the native T3 `threadId`/`items` contract with bounded pagination. Live UI has no write, launch, resume, or cancel controls. `npm test` covers Worker rendering/cache mode, callback issuer/state handling, two-browser isolation, JSON and multiline SSE correlation, upstream failures/size cancellation, native envelope normalization, UI response races, rate limiting, prior mock behavior, JWT verification, and Nexus v1 compatibility.
+- Live setup still requires verified board Access values, fixed `BOARD_ORIGIN`, a configured rate-limit binding, and the server-side `T3_PROJECTS_JSON` in the example. A public GitHub API lookup verified repository node ID `R_kgDOUSfguQ`; the existing T3 project and workspace mapping were supplied in the task. The deployed Worker has only GITHUB_TOKEN bound, and the existing board redirects to Access login. Its API allowlist configuration and an authenticated pilot remain unverified. No real OAuth exchange, real conversation read, deploy, merge, T3 configuration change, or resource provisioning was performed.
+- Historical 2026-11-03 Access setup attempt: Cloudflare rejected a service-token creation request with HTTP 403/code 1010. No Access app/policy or T3 credential was created and no configuration changed. This does not block the native T3 OAuth implementation; keep the board's existing Access protection and allowlist as a prerequisite.
+
+Supervisor verification: `npm test`, `git diff --check`, and Wrangler 4.157.0 dry-run builds of default and live-example configurations passed. Browser UI fixture checks passed at 320px/1280px for layout, selected messages, Escape, close/reopen restore and disconnect. Real native registration returned 201; no authenticated OAuth approval or board-to-T3 read has completed.
 
 ## Next steps
-1. Review the `feat/t3-workspace-integration` diff and test results; do not deploy or merge automatically.
-2. Before a read-only pilot, verify the existing Access application/team domain/audience/allowlist and whether the board itself is protected.
-3. Verify the supported T3 remote transport and authentication, project and thread association, and polling behavior, then verify the selected workspace and mapping. No `glb-viewer` mapping was found in this environment. The user's existing authorization covers the read-only pilot after these prerequisites are verified; do not ask for additional pilot authorization. No automatic deployment is authorized.
-4. Choose durable server side conversation persistence before multi-device use. Current mock conversations are browser localStorage only; no D1 binding or database ID was added.
+1. Review the current implementation and `npm test` results; keep PR #3 draft; do not deploy or merge without approval.
+2. Before real browser acceptance, verify the existing board Access app/team domain/audience/allowlist and use an already protected preview. Configure live values and a rate limiter only through the existing operator workflow; no provisioning or security changes are authorized here.
+3. Complete the native T3 approval flow with exactly `orchestration:read`, then verify real list/read behavior and disconnect/revoke handling. The checkout has only mocked OAuth and MCP tests; no live acceptance has been performed.
+4. Mock conversations remain browser-local. Live credentials are server side in the Durable Object; conversation data remains at T3 and is fetched on demand.
 5. Star Rewards: add the session bookmark rule to its CLAUDE.md (it only has AGENTS.md so far).
 6. Idea parked: a "Bookmark this" button so an agent drafts NOW.md for repos in "No bookmark yet".
 

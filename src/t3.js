@@ -37,7 +37,7 @@ export function resolveProject(repo, env) {
   if (list.some((other) => other !== m && (other?.projectId === m.projectId || other?.workspaceRoot === m.workspaceRoot))) {
     throw new T3Error(503, "mapping_ambiguous", "A T3 project or workspace is mapped to more than one repository");
   }
-  throw new T3Error(503, "live_transport_unavailable", "Live T3 transport is not configured: the verified remote API and authentication contract are still pending");
+  return { ...identity, mode, projectId: m.projectId, workspaceRoot: m.workspaceRoot };
 }
 
 function decodeBase64Url(s) {
@@ -84,7 +84,24 @@ export async function verifyAccess(request, env, fetcher = fetch) {
 
 function json(value, status = 200) { return new Response(JSON.stringify(value), { status, headers: JSON_HEADERS }); }
 
-async function readLimited(request) {
+export async function enforceRateLimit(identity, env) {
+  // Only mock mode may operate without a binding. Never replace this with
+  // isolate-local counters: live requests require the Workers binding.
+  if (env.T3_MODE === "mock" && env.T3_RATE_LIMITER === undefined) return;
+  const unavailable = () => new T3Error(503, "rate_limiter_unavailable", "T3 rate limiting is unavailable");
+  if (typeof env.T3_RATE_LIMITER?.limit !== "function") throw unavailable();
+  if (typeof identity?.sub !== "string" || !identity.sub || identity.sub.length > 12_000) throw unavailable();
+  let result;
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity.sub));
+    const key = `t3:subject:v1:${Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("")}`;
+    result = await env.T3_RATE_LIMITER.limit({ key });
+  } catch { throw unavailable(); }
+  if (result?.success === false) throw new T3Error(429, "rate_limited", "Too many T3 requests; retry later");
+  if (result?.success !== true) throw unavailable();
+}
+
+export async function readLimited(request) {
   const reader = request.body?.getReader();
   if (!reader) return "";
   const chunks = [];
@@ -108,17 +125,31 @@ export async function handleT3Request(request, env, options = {}) {
   try {
     if (url.pathname !== "/api/t3" || !["GET", "POST"].includes(request.method)) throw new T3Error(404, "not_found", "Not found");
     const auth = options.authenticate || verifyAccess;
-    await auth(request, env, options.fetcher);
-    const expectedOrigin = url.origin;
+    const identity = await auth(request, env, options.fetcher);
+    let expectedOrigin = url.origin;
+    if (env.T3_MODE === "live") {
+      let configured;
+      try { configured = new URL(env.BOARD_ORIGIN || ""); } catch { throw new T3Error(503, "oauth_not_configured", "Native T3 sign-in is not configured"); }
+      const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(configured.hostname);
+      if ((configured.protocol !== "https:" && !(configured.protocol === "http:" && loopback)) || configured.username || configured.password || configured.pathname !== "/" || configured.search || configured.hash) throw new T3Error(503, "oauth_not_configured", "Native T3 sign-in is not configured");
+      expectedOrigin = configured.origin;
+      if (url.origin !== expectedOrigin) throw new T3Error(403, "origin_rejected", "Request origin is not allowed");
+    }
     const origin = request.headers.get("origin");
     if ((origin && origin !== expectedOrigin) || (request.method === "POST" && origin !== expectedOrigin)) throw new T3Error(403, "origin_rejected", "Request origin is not allowed");
     if (request.method === "POST" && request.headers.get("x-repo-board-request") !== "1") throw new T3Error(403, "csrf_rejected", "Request could not be verified");
     if (request.method === "POST" && !/^application\/json(?:\s*;|$)/i.test(request.headers.get("content-type") || "")) throw new T3Error(415, "content_type_rejected", "JSON content type is required");
+    if (env.T3_MODE === "live" || env.T3_MODE === "mock") await enforceRateLimit(identity, env);
     const repoId = url.searchParams.get("repoId");
     if (!REPO_ID.test(repoId || "")) throw new T3Error(400, "invalid_repository", "Repository identity is invalid");
     const repo = await options.findRepo?.(repoId);
     if (!repo) throw new T3Error(404, "repository_not_found", "Repository was not found");
-    if (env.T3_MODE === "live") resolveProject(repo, env);
+    if (env.T3_MODE === "live") {
+      if (request.method !== "GET") throw new T3Error(405, "read_only", "Live T3 access is read only");
+      resolveProject(repo, env);
+      if (!options.liveRead) throw new T3Error(503, "live_transport_unavailable", "Live T3 transport is unavailable");
+      return await options.liveRead(request, env, identity, repo);
+    }
     if (env.T3_MODE !== "mock") throw new T3Error(503, "t3_disabled", "T3 integration is disabled");
     const project = resolveProject(repo, env);
     if (request.method === "GET") {
@@ -143,6 +174,10 @@ export async function handleT3Request(request, env, options = {}) {
     return json({ mock: true, project, thread: { id: body.threadId, status, updatedAt: new Date().toISOString(), message: text } });
   } catch (e) {
     const err = e instanceof T3Error ? e : new T3Error(502, "t3_unavailable", "T3 service is temporarily unavailable");
-    return json({ error: { code: err.code, message: err.message } }, err.status);
+    const response = json({ error: { code: err.code, message: err.message } }, err.status);
+    // The binding provides no reset time. 60 seconds covers either supported
+    // window (10 or 60 seconds), without trusting request or error metadata.
+    if (err.status === 429) response.headers.set("retry-after", "60");
+    return response;
   }
 }
