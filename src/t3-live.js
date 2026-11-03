@@ -289,6 +289,9 @@ export async function liveRead(request, env, identity, repo, fetcher = fetch) {
   const init = await mcpRequest(fetcher, access.accessToken, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "repo-board", version: "1" } }, mcpSession);
   if (!init || init.protocolVersion !== "2025-06-18") throw fail(502, "t3_version_unsupported", "T3 returned an unsupported conversation protocol version");
   await mcpRequest(fetcher, access.accessToken, "notifications/initialized", undefined, mcpSession);
+  // Temporary discovery: list T3 tool names (names only) to plan the next pilot step.
+  let toolNames = [];
+  try { const listedTools = await mcpRequest(fetcher, access.accessToken, "tools/list", {}, mcpSession); toolNames = (Array.isArray(listedTools?.tools) ? listedTools.tools : []).map((t) => t?.name).filter((n) => typeof n === "string" && /^[A-Za-z0-9_.-]{1,80}$/.test(n)).slice(0, 50); } catch { /* discovery is optional */ }
   const projectData = await tool(fetcher, access.accessToken, mcpSession, "t3_project_read", { projectId: mapping.projectId });
   const project = normalizedProject(projectData, mapping);
   const cursorValue = new URL(request.url).searchParams.get("cursor");
@@ -312,7 +315,7 @@ export async function liveRead(request, env, identity, repo, fetcher = fetch) {
     const items = Array.isArray(details?.items) ? details.items : [];
     selected = { ...normalized, items: items.slice(0, MAX_ITEMS).map(normalizeItem), itemsTruncated: items.length > MAX_ITEMS, nextPosition: Number.isSafeInteger(details?.nextPosition) ? details.nextPosition : null, hasMore: details?.hasMore === true || items.length > MAX_ITEMS, view: "messages" };
   }
-  return json({ mode: "live-read-only", project, conversations: threads, nextCursor: page.nextCursor, hasMore: page.nextCursor !== null || page.truncated, truncated: page.truncated, total: page.total, selected });
+  return json({ mode: "live-read-only", tools: toolNames, project, conversations: threads, nextCursor: page.nextCursor, hasMore: page.nextCursor !== null || page.truncated, truncated: page.truncated, total: page.total, selected });
 }
 
 export async function handleT3AuthRequest(request, env, options = {}) {
