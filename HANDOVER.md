@@ -38,13 +38,17 @@ Repos glb-viewer, star-rewards and Ebeltoft3D already have NOW.md plus a CLAUDE.
 
 ## Status
 - Version 1 is deployed and works against real GitHub (Martin's screenshot, 2026-10-31).
-- Version 2 (Decide lane, Retire, Graveyard) passes all tests and builds with `wrangler deploy --dry-run`, but is **not deployed yet**.
+- Version 2 (Decide lane, Retire, Graveyard) was previously verified locally but deployment status is not confirmed here; do not deploy automatically.
+- `feat/t3-workspace-integration` adds an optional mock-first T3 panel and a fail-closed API boundary. The mock adapter does not call T3. Mock threads/activity persist only in this browser's localStorage. Tests execute the injectable client and cover opaque repo IDs, stale/duplicate mappings, JWT verification, authorization/CSRF, repo isolation and async switching, idempotent mock create, reload selection, retry/failure states, exact prompt and Nexus v1 compatibility, fail-closed modes, and responsive dialog behavior.
+- Cloudflare Access configuration and policy remain unverified. Live T3 endpoint/auth contract, project mapping, and durable server conversation storage remain unresolved. No live acceptance test, deployment, D1 binding, or T3 resource creation was performed. On 2026-11-03, `https://t3.jeppesen.cc/` returned HTTP 200 without redirect when probed unauthenticated; this does not establish Access protection or API authorization.
 
 ## Next steps
-1. `npm test`, then `npx wrangler deploy`, then check the live board: Decide lane, PR ages, archived repos in Graveyard.
-2. Confirm the board is behind Cloudflare Access (own email only). It shows private repo names and notes.
-3. Star Rewards: add the session bookmark rule to its CLAUDE.md (it only has AGENTS.md so far).
-4. Idea parked: a "Bookmark this" button so an agent drafts NOW.md for repos in "No bookmark yet".
+1. Review the `feat/t3-workspace-integration` diff and test results; do not deploy or merge automatically.
+2. Before a read-only pilot, verify the existing Access application/team domain/audience/allowlist and whether the board itself is protected.
+3. Verify the supported T3 remote transport and authentication, project and thread association, and polling behavior, then verify the selected workspace and mapping. No `glb-viewer` mapping was found in this environment. The user's existing authorization covers the read-only pilot after these prerequisites are verified; do not ask for additional pilot authorization. No automatic deployment is authorized.
+4. Choose durable server side conversation persistence before multi-device use. Current mock conversations are browser localStorage only; no D1 binding or database ID was added.
+5. Star Rewards: add the session bookmark rule to its CLAUDE.md (it only has AGENTS.md so far).
+6. Idea parked: a "Bookmark this" button so an agent drafts NOW.md for repos in "No bookmark yet".
 
 ## Ground rules
 - Keep it simple: one Worker, no database unless a feature truly needs one.
