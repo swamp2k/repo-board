@@ -56,21 +56,20 @@ function parseCookieSession(request, identity, record) {
   return record.session;
 }
 
-async function safeOAuthFetch(fetcher, url, init) {
+// Registration and token steps: report which sub-step failed (safe codes, no secrets) so a failed sign-in can be diagnosed.
+async function stepFetch(step, fetcher, url, init) {
   let response;
-  try { response = await fixedFetch(fetcher, url, init); } catch { throw fail(502, "t3_oauth_unavailable", "T3 sign-in could not be completed"); }
-  if (!response.ok) throw fail(502, "t3_oauth_unavailable", "T3 sign-in could not be completed");
+  try { response = await fetcher(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(10_000) }); } catch (e) { throw fail(502, `t3_${step}_unreachable`, `T3 sign-in could not be completed (could not reach T3 ${step}: ${e?.name === "TimeoutError" ? "timeout" : e?.name === "AbortError" ? "aborted" : "network error"})`); }
+  if (response.status >= 300 && response.status < 400) { let host = "unknown"; try { host = new URL(response.headers.get("location") || "", url).hostname; } catch { /* keep unknown */ } throw fail(502, `t3_${step}_redirected`, `T3 sign-in could not be completed (T3 ${step} was redirected, HTTP ${response.status}, to ${host})`); }
+  if (!response.ok) {
+    let oauthError = "";
+    try { const body = await safeJson(response.clone()); if (typeof body?.error === "string" && /^[A-Za-z0-9_.-]{1,64}$/.test(body.error)) oauthError = `, T3 said: ${body.error}`; } catch { /* no detail */ }
+    throw fail(502, `t3_${step}_rejected`, `T3 sign-in could not be completed (T3 ${step} answered HTTP ${response.status}${oauthError})`);
+  }
   return response;
 }
-
-// Registration step only: report which sub-step failed (safe codes, no upstream text) so a failed sign-in can be diagnosed.
-async function registerFetch(fetcher, url, init) {
-  let response;
-  try { response = await fetcher(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(10_000) }); } catch (e) { throw fail(502, "t3_register_unreachable", `T3 sign-in could not be completed (could not reach T3 registration: ${e?.name === "TimeoutError" ? "timeout" : e?.name === "AbortError" ? "aborted" : "network or redirect error"})`); }
-  if (response.status >= 300 && response.status < 400) { let host = "unknown"; try { host = new URL(response.headers.get("location") || "", url).hostname; } catch { /* keep unknown */ } throw fail(502, "t3_register_redirected", `T3 sign-in could not be completed (T3 registration was redirected, HTTP ${response.status}, to ${host})`); }
-  if (!response.ok) throw fail(502, "t3_register_rejected", `T3 sign-in could not be completed (T3 registration answered HTTP ${response.status})`);
-  return response;
-}
+const registerFetch = (fetcher, url, init) => stepFetch("registration", fetcher, url, init);
+const tokenFetch = (fetcher, url, init) => stepFetch("token", fetcher, url, init);
 
 async function safeJson(response, maxBytes = 32_000) {
   const declared = Number(response.headers.get("content-length") || 0);
@@ -127,7 +126,7 @@ async function callback(request, env, identity, fetcher) {
   const pending = consumed.pending;
   if (!pending || pending.expiresAt <= Date.now() || pending.issuer !== T3_ISSUER || pending.subject !== identity.sub || pending.callback !== `${origin}/api/t3/auth/callback`) throw fail(400, "oauth_state_invalid", "T3 sign-in could not be completed");
   if (oauthError) return new Response(null, { status: 303, headers: { location: `${origin}/?t3=error&reason=oauth_denied`, "cache-control": "no-store", "set-cookie": cookieHeader(sid) } });
-  const response = await safeOAuthFetch(fetcher, TOKEN, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" }, body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: pending.callback, client_id: pending.clientId, code_verifier: pending.verifier, resource: RESOURCE }) });
+  const response = await tokenFetch(fetcher, TOKEN, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" }, body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: pending.callback, client_id: pending.clientId, code_verifier: pending.verifier, resource: RESOURCE }) });
   const token = await safeJson(response);
   if (!token || token.token_type?.toLowerCase() !== "bearer" || typeof token.access_token !== "string" || !token.access_token || token.scope !== SCOPE || !Number.isFinite(token.expires_in) || token.expires_in <= 0) {
     await storeCall(stub, "clear", { sid: pending.sid, subject: identity.sub });
