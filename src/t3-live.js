@@ -8,7 +8,7 @@ const TOKEN = `${T3_ISSUER}/oauth/mcp/token`;
 const REGISTER = `${T3_ISSUER}/oauth/mcp/register`;
 const MCP = `${T3_ISSUER}/mcp`;
 const RESOURCE = MCP;
-const SCOPE = "orchestration:read";
+const OPERATE_SCOPE = "orchestration:operate";
 const COOKIE = "__Host-repo-board-t3";
 const MAX_RESPONSE = 1_000_000;
 const MAX_THREADS = 50;
@@ -129,11 +129,11 @@ async function callback(request, env, identity, fetcher) {
   if (oauthError) return new Response(null, { status: 303, headers: { location: `${origin}/?t3=error&reason=oauth_denied`, "cache-control": "no-store", "set-cookie": cookieHeader(sid) } });
   const response = await tokenFetch(fetcher, TOKEN, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" }, body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: pending.callback, client_id: pending.clientId, code_verifier: pending.verifier, resource: RESOURCE }) });
   const token = await safeJson(response);
-  if (!token || token.token_type?.toLowerCase() !== "bearer" || typeof token.access_token !== "string" || !token.access_token || token.scope !== SCOPE || !Number.isFinite(token.expires_in) || token.expires_in <= 0) {
+  if (!token || token.token_type?.toLowerCase() !== "bearer" || typeof token.access_token !== "string" || !token.access_token || !["orchestration:read", "orchestration:operate orchestration:read"].includes(typeof token.scope === "string" ? token.scope.trim().split(/\s+/).sort().join(" ") : "") || !Number.isFinite(token.expires_in) || token.expires_in <= 0) {
     await storeCall(stub, "clear", { sid: pending.sid, subject: identity.sub });
-    throw fail(403, "t3_scope_rejected", "T3 did not grant exactly read-only access; no session was saved");
+    throw fail(403, "t3_scope_rejected", "T3 did not grant read access (optionally with operate); no session was saved");
   }
-  await storeCall(stub, "connect", { subject: identity.sub, sid: pending.sid, accessToken: token.access_token, expiresAt: Date.now() + token.expires_in * 1000 });
+  await storeCall(stub, "connect", { subject: identity.sub, sid: pending.sid, accessToken: token.access_token, canOperate: token.scope.split(/\s+/).includes(OPERATE_SCOPE), expiresAt: Date.now() + token.expires_in * 1000 });
   return new Response(null, { status: 303, headers: { location: `${origin}/?t3=connected&repoId=R_kgDOUSfguQ`, "cache-control": "no-store", "set-cookie": cookieHeader(pending.sid, Math.min(token.expires_in, 30 * 86400)) } });
 }
 
@@ -148,7 +148,7 @@ export class T3AuthStore {
     const now = Date.now();
     if (action === "begin" && (!data || typeof data.state !== "string" || data.state.length > 128 || typeof data.verifier !== "string" || data.verifier.length < 43 || data.verifier.length > 128 || !validSid(data.sid) || typeof data.subject !== "string" || !data.subject || data.subject.length > 512 || typeof data.clientId !== "string" || !data.clientId || data.clientId.length > 512 || data.issuer !== T3_ISSUER || typeof data.callback !== "string" || data.callback.length > 2048 || !Number.isFinite(data.expiresAt) || data.expiresAt <= now || data.expiresAt > now + 6 * 60_000)) return new Response(null, { status: 400 });
     if (action === "consume" && (!data || typeof data.state !== "string" || !validSid(data.sid) || typeof data.subject !== "string" || data.state.length > 128 || data.subject.length > 512)) return new Response(null, { status: 400 });
-    if (action === "connect" && (!data || typeof data.subject !== "string" || !data.subject || data.subject.length > 512 || !validSid(data.sid) || typeof data.accessToken !== "string" || !data.accessToken || data.accessToken.length > 4_000 || /[\u0000-\u001f]/.test(data.accessToken) || !Number.isFinite(data.expiresAt) || data.expiresAt <= now || data.expiresAt > now + 366 * 86400_000)) return new Response(null, { status: 400 });
+    if (action === "connect" && (!data || typeof data.subject !== "string" || !data.subject || data.subject.length > 512 || !validSid(data.sid) || typeof data.accessToken !== "string" || !data.accessToken || data.accessToken.length > 4_000 || /[\u0000-\u001f]/.test(data.accessToken) || (data.canOperate !== undefined && typeof data.canOperate !== "boolean") || !Number.isFinite(data.expiresAt) || data.expiresAt <= now || data.expiresAt > now + 366 * 86400_000)) return new Response(null, { status: 400 });
     const result = {};
     await this.ctx.storage.transaction(async (txn) => {
       const record = await txn.get("record") || {};
@@ -274,7 +274,7 @@ function normalizeItem(item) {
   return { type: typeof item.type === "string" ? item.type.slice(0, 100) : "unknown", createdBy: typeof item.createdBy === "string" ? item.createdBy.slice(0, 80) : "unknown", text: source.slice(0, MAX_ITEM_CHARS), textTruncated: item.textTruncated === true || source.length > MAX_ITEM_CHARS, at: item.createdAt || item.updatedAt || null };
 }
 
-export async function liveRead(request, env, identity, repo, fetcher = fetch) {
+function verifiedMapping(env, repo) {
   const canonical = canonicalRepo(repo);
   const map = JSON.parse(env.T3_PROJECTS_JSON || "[]");
   if (!Array.isArray(map) || map.length !== 1) throw fail(503, "mapping_unavailable", "The verified T3 project mapping is unavailable");
@@ -282,6 +282,11 @@ export async function liveRead(request, env, identity, repo, fetcher = fetch) {
   if (matches.length !== 1) throw fail(503, "mapping_unavailable", "No unique verified T3 project mapping exists for this repository");
   const mapping = matches[0];
   if (canonical.id !== "R_kgDOUSfguQ" || canonical.owner !== "swamp2k" || canonical.name !== "glb-viewer" || mapping.owner !== canonical.owner || mapping.name !== canonical.name || mapping.projectId !== "mcp:6ccdf28e-d941-4b71-a636-a344020b5643" || mapping.workspaceRoot !== "/projects/glb-viewer") throw fail(403, "project_mismatch", "Only the verified glb-viewer T3 project is available");
+  return mapping;
+}
+
+export async function liveRead(request, env, identity, repo, fetcher = fetch) {
+  const mapping = verifiedMapping(env, repo);
   const stub = await storeFor(identity, env, cookieValue(request));
   const record = await storeCall(stub, "read", { sid: cookieValue(request), subject: identity.sub });
   const access = parseCookieSession(request, identity, record);
@@ -289,10 +294,6 @@ export async function liveRead(request, env, identity, repo, fetcher = fetch) {
   const init = await mcpRequest(fetcher, access.accessToken, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "repo-board", version: "1" } }, mcpSession);
   if (!init || init.protocolVersion !== "2025-06-18") throw fail(502, "t3_version_unsupported", "T3 returned an unsupported conversation protocol version");
   await mcpRequest(fetcher, access.accessToken, "notifications/initialized", undefined, mcpSession);
-  // Temporary discovery: list T3 tool names (names only) to plan the next pilot step.
-  let toolNames = []; const discovery = {};
-  try { const meta = await safeJson(await fixedFetch(fetcher, `${T3_ISSUER}/.well-known/oauth-authorization-server`, { headers: { accept: "application/json" } })); discovery.scopes = JSON.stringify(meta?.scopes_supported ?? null).slice(0, 1000); } catch { /* optional */ }
-  try { const listedTools = await mcpRequest(fetcher, access.accessToken, "tools/list", {}, mcpSession); for (const t of Array.isArray(listedTools?.tools) ? listedTools.tools : []) if (["t3_thread_send", "t3_pending_request"].includes(t?.name)) discovery[t.name] = JSON.stringify(t.inputSchema ?? null).slice(0, 2000); toolNames = (Array.isArray(listedTools?.tools) ? listedTools.tools : []).map((t) => t?.name).filter((n) => typeof n === "string" && /^[A-Za-z0-9_.-]{1,80}$/.test(n)).slice(0, 50); } catch { /* discovery is optional */ }
   const projectData = await tool(fetcher, access.accessToken, mcpSession, "t3_project_read", { projectId: mapping.projectId });
   const project = normalizedProject(projectData, mapping);
   const cursorValue = new URL(request.url).searchParams.get("cursor");
@@ -316,7 +317,35 @@ export async function liveRead(request, env, identity, repo, fetcher = fetch) {
     const items = Array.isArray(details?.items) ? details.items : [];
     selected = { ...normalized, items: items.slice(0, MAX_ITEMS).map(normalizeItem), itemsTruncated: items.length > MAX_ITEMS, nextPosition: Number.isSafeInteger(details?.nextPosition) ? details.nextPosition : null, hasMore: details?.hasMore === true || items.length > MAX_ITEMS, view: "messages" };
   }
-  return json({ mode: "live-read-only", tools: toolNames, discovery, project, conversations: threads, nextCursor: page.nextCursor, hasMore: page.nextCursor !== null || page.truncated, truncated: page.truncated, total: page.total, selected });
+  return json({ mode: "live-read-only", project, conversations: threads, nextCursor: page.nextCursor, hasMore: page.nextCursor !== null || page.truncated, truncated: page.truncated, total: page.total, selected });
+}
+
+const sendAllowed = (env, identity) => String(env.T3_SEND_EMAILS || "").toLowerCase().split(",").map((x) => x.trim()).filter(Boolean).includes(String(identity?.email || "").toLowerCase());
+
+// Send one follow-up message into an existing conversation of the verified project.
+// Requires: sender email in T3_SEND_EMAILS, board CSRF token, and a T3 grant that includes orchestration:operate.
+export async function liveSend(request, env, identity, repo, fetcher = fetch) {
+  const mapping = verifiedMapping(env, repo);
+  if (!sendAllowed(env, identity)) throw fail(403, "t3_send_not_allowed", "Your account may read but not send T3 messages");
+  const body = await readLimited(request).then((text) => JSON.parse(text)).catch(() => null);
+  const sid = cookieValue(request);
+  const stub = await storeFor(identity, env, sid);
+  const record = await storeCall(stub, "read", { sid, subject: identity.sub });
+  if (!body || !record.csrf || body.csrf !== record.csrf || request.headers.get("x-repo-board-csrf") !== record.csrf) throw fail(403, "csrf_rejected", "Request could not be verified");
+  const access = parseCookieSession(request, identity, record);
+  if (!access.canOperate) throw fail(403, "t3_send_not_permitted", "T3 only granted read access. Disconnect, reconnect, and pick Auto-accept edits on T3's screen");
+  const threadId = body.threadId, message = typeof body.message === "string" ? body.message.trim() : "";
+  if (typeof threadId !== "string" || !threadId || threadId.length > 512) throw fail(400, "invalid_conversation", "Conversation id is invalid");
+  if (!message || message.length > 4000) throw fail(400, "invalid_message", "Message must be 1 to 4000 characters");
+  const mcpSession = { version: "2025-06-18" };
+  const init = await mcpRequest(fetcher, access.accessToken, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "repo-board", version: "1" } }, mcpSession);
+  if (!init || init.protocolVersion !== "2025-06-18") throw fail(502, "t3_version_unsupported", "T3 returned an unsupported conversation protocol version");
+  await mcpRequest(fetcher, access.accessToken, "notifications/initialized", undefined, mcpSession);
+  // Confirm the conversation belongs to the verified project before sending anything.
+  const details = await tool(fetcher, access.accessToken, mcpSession, "t3_thread_read", { threadId, view: "messages", limit: 1, maxCharsPerItem: 100 });
+  if (normalizeThread(details?.thread || details, mapping.projectId).id !== threadId) throw fail(403, "thread_mismatch", "The T3 conversation did not belong to this project");
+  await tool(fetcher, access.accessToken, mcpSession, "t3_thread_send", { threadId, message, mode: "queue", clientRequestId: crypto.randomUUID() });
+  return json({ sent: true });
 }
 
 export async function handleT3AuthRequest(request, env, options = {}) {
@@ -355,7 +384,8 @@ export async function handleT3AuthRequest(request, env, options = {}) {
       const stub = await storeFor(identity, env, sid);
       const record = await storeCall(stub, "read", { sid, subject: identity.sub });
       const session = record.session;
-      return json({ connected: !!session && session.subject === identity.sub && session.sid === sid && session.expiresAt > Date.now(), csrf: record.csrf }, 200, { "set-cookie": cookieHeader(sid, 30 * 86400) });
+      const live = !!session && session.subject === identity.sub && session.sid === sid && session.expiresAt > Date.now();
+      return json({ connected: live, canSend: live && session.canOperate === true && sendAllowed(env, identity), csrf: record.csrf }, 200, { "set-cookie": cookieHeader(sid, 30 * 86400) });
     }
     throw fail(404, "not_found", "Not found");
   } catch (e) {

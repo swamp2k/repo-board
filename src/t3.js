@@ -145,8 +145,11 @@ export async function handleT3Request(request, env, options = {}) {
     const repo = await options.findRepo?.(repoId);
     if (!repo) throw new T3Error(404, "repository_not_found", "Repository was not found");
     if (env.T3_MODE === "live") {
-      if (request.method !== "GET") throw new T3Error(405, "read_only", "Live T3 access is read only");
       resolveProject(repo, env);
+      if (request.method === "POST") {
+        if (!options.liveSend) throw new T3Error(405, "read_only", "Live T3 access is read only");
+        return await options.liveSend(request, env, identity, repo);
+      }
       if (!options.liveRead) throw new T3Error(503, "live_transport_unavailable", "Live T3 transport is unavailable");
       return await options.liveRead(request, env, identity, repo);
     }

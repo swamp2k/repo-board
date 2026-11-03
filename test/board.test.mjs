@@ -2,7 +2,7 @@ import web, { parseNow, laneFor, renderBoard, page, promptsFor, buildBoard, t3In
 import assert from "node:assert";
 import { canonicalRepo, resolveProject, verifyAccess, handleT3Request } from "../src/t3.js";
 import { createT3Client } from "../src/t3-client.js";
-import { handleT3AuthRequest, liveRead, T3AuthStore } from "../src/t3-live.js";
+import { handleT3AuthRequest, liveRead, liveSend, T3AuthStore } from "../src/t3-live.js";
 import { runInNewContext } from "node:vm";
 
 const now = Date.parse("2026-10-31T14:00:00Z");
@@ -693,4 +693,37 @@ console.log("all tests passed");
   assert.equal(publicError.status, 502);
   assert(!(await publicError.text()).includes("private-value"), "untrusted upstream errors are redacted from the browser response");
   console.log("read-only MCP JSON/SSE transport, project membership, cookie binding and tool allowlist checks ok");
+}
+
+// Live send: only allowlisted emails, only with an operate grant, only into conversations of the verified project.
+{
+  const sid = "A".repeat(43);
+  const repo = { id: "R_kgDOUSfguQ", owner: { login: "swamp2k" }, name: "glb-viewer", url: "https://github.com/swamp2k/glb-viewer" };
+  const projectId = "mcp:6ccdf28e-d941-4b71-a636-a344020b5643";
+  const makeEnv = (canOperate) => ({
+    T3_SEND_EMAILS: "owner@example.com",
+    T3_PROJECTS_JSON: JSON.stringify([{ repoId: repo.id, owner: "swamp2k", name: "glb-viewer", projectId, workspaceRoot: "/projects/glb-viewer" }]),
+    T3_AUTH_STORE: { idFromName: (n) => n, get: () => ({ fetch: async () => Response.json({ sid, csrf: "csrf-1", session: { sid, subject: "sub-1", accessToken: "tok", canOperate, expiresAt: Date.now() + 60_000 } }) }) },
+  });
+  const sendRequest = (csrf = "csrf-1") => new Request("https://board.example/api/t3?repoId=R_kgDOUSfguQ", { method: "POST", headers: { cookie: `__Host-repo-board-t3=${sid}`, "content-type": "application/json", "x-repo-board-csrf": csrf }, body: JSON.stringify({ csrf, threadId: "th-1", message: "Go ahead" }) });
+  const makeFetch = (threadProject, sent) => async (url, init) => {
+    const call = JSON.parse(init.body);
+    if (call.method === "initialize") return Response.json({ jsonrpc: "2.0", id: call.id, result: { protocolVersion: "2025-06-18" } });
+    if (call.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (call.params.name === "t3_thread_read") return Response.json({ jsonrpc: "2.0", id: call.id, result: { structuredContent: { thread: { threadId: "th-1", projectId: threadProject } } } });
+    if (call.params.name === "t3_thread_send") { sent.push(call.params.arguments); return Response.json({ jsonrpc: "2.0", id: call.id, result: { structuredContent: { ok: true } } }); }
+    throw Error("unexpected tool " + call.params.name);
+  };
+  const owner = { sub: "sub-1", email: "owner@example.com" };
+  let sent = [];
+  const ok = await liveSend(sendRequest(), makeEnv(true), owner, repo, makeFetch(projectId, sent));
+  assert.equal((await ok.json()).sent, true);
+  assert.equal(sent.length, 1); assert.equal(sent[0].threadId, "th-1"); assert.equal(sent[0].message, "Go ahead"); assert.equal(sent[0].mode, "queue");
+  sent = [];
+  await assert.rejects(() => liveSend(sendRequest(), makeEnv(true), { sub: "sub-1", email: "reader@example.com" }, repo, makeFetch(projectId, sent)), (e) => e.code === "t3_send_not_allowed");
+  await assert.rejects(() => liveSend(sendRequest(), makeEnv(false), owner, repo, makeFetch(projectId, sent)), (e) => e.code === "t3_send_not_permitted");
+  await assert.rejects(() => liveSend(sendRequest("wrong"), makeEnv(true), owner, repo, makeFetch(projectId, sent)), (e) => e.code === "csrf_rejected");
+  await assert.rejects(() => liveSend(sendRequest(), makeEnv(true), owner, repo, makeFetch("mcp:other", sent)), (e) => e.code === "thread_mismatch");
+  assert.equal(sent.length, 0, "nothing is sent when any check fails");
+  console.log("live send allowlist, operate grant, CSRF and project membership checks ok");
 }

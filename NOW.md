@@ -1,6 +1,6 @@
 ## Where I left off
-Doing: Fix native T3 sign-in and live read for the glb-viewer pilot
-State: Root cause found: Cloudflare Workers does not support fetch redirect "error" (it throws), so every Worker call to T3 (register, token, MCP) failed as a network error. All T3 fetches now use redirect "manual" and reject 3xx. Deployed and verified live by Martin 2026-11-03: sign-in completes and the glb-viewer conversation list loads. Added step-specific error messages for registration, token and MCP calls, and the T3 panel now opens to show sign-in errors. Tests pass.
-Next step: Verify opening a conversation's messages, rate-limit denial, selection restore and disconnect. Then decide on merging PR #3 (still draft). Deploy: npx wrangler deploy --config wrangler.pilot.toml --keep-vars.
-Blocked by: Nothing; remaining checks need Martin in the browser.
+Doing: Let Repo Board send follow-up messages into glb-viewer T3 conversations
+State: Read-only pilot verified live 2026-11-03 (sign-in, list, answer-first reading). Root cause of earlier failures: Workers does not support fetch redirect "error"; all T3 calls now use "manual". Send support added (not yet deployed): POST /api/t3 calls t3_thread_send (mode queue) after checking the sender is in T3_SEND_EMAILS (Martin's two addresses), the board CSRF token, a T3 grant including orchestration:operate, and that the conversation belongs to the glb-viewer project. UI has a message box, a "Take the next step" shortcut and a click-twice send. Tests pass.
+Next step: Deploy wrangler.pilot.toml, Disconnect, reconnect choosing Auto-accept edits on T3's screen, then send one message and confirm T3 picks it up. Keep PR #3 draft.
+Blocked by: Martin's deploy and live test.
 Updated: 2026-11-03
