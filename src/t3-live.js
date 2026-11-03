@@ -314,6 +314,10 @@ export async function liveRead(request, env, identity, repo, fetcher = fetch) {
   if (!init || init.protocolVersion !== "2025-06-18") throw fail(502, "t3_version_unsupported", "T3 returned an unsupported conversation protocol version");
   await mcpRequest(fetcher, access.accessToken, "notifications/initialized", undefined, mcpSession);
   const project = await resolveLiveProject(fetcher, access.accessToken, mcpSession, mapping);
+  // TEMPORARY discovery for launching conversations and answering approvals (names, schemas, raw pending list).
+  const discovery = env.T3_DISCOVERY === "1" ? {} : null;
+  if (discovery) try { const lt = await mcpRequest(fetcher, access.accessToken, "tools/list", {}, mcpSession); for (const t of lt?.tools || []) if (["t3_thread_launch", "create_threads", "t3_pending_request"].includes(t?.name)) discovery[t.name] = JSON.stringify(t.inputSchema ?? null).slice(0, 2500) + " :: " + String(t.description || "").slice(0, 400); } catch { /* optional */ }
+  if (discovery) try { discovery.pendingList = JSON.stringify(await tool(fetcher, access.accessToken, mcpSession, "t3_pending_request", { action: "list" })).slice(0, 2500); } catch (e) { discovery.pendingList = "error: " + String(e?.message).slice(0, 200); }
   const cursorValue = new URL(request.url).searchParams.get("cursor");
   const requestedCursor = cursorValue === null ? undefined : Number(cursorValue);
   if (cursorValue !== null && (!/^\d{1,8}$/.test(cursorValue) || !Number.isSafeInteger(requestedCursor))) throw fail(400, "invalid_conversation_page", "Conversation page is invalid");
@@ -335,7 +339,7 @@ export async function liveRead(request, env, identity, repo, fetcher = fetch) {
     const items = Array.isArray(details?.items) ? details.items : [];
     selected = { ...normalized, items: items.slice(0, MAX_ITEMS).map(normalizeItem), itemsTruncated: items.length > MAX_ITEMS, nextPosition: Number.isSafeInteger(details?.nextPosition) ? details.nextPosition : null, hasMore: details?.hasMore === true || items.length > MAX_ITEMS, view: "messages" };
   }
-  return json({ mode: "live-read-only", project, conversations: threads, nextCursor: page.nextCursor, hasMore: page.nextCursor !== null || page.truncated, truncated: page.truncated, total: page.total, selected });
+  return json({ mode: "live-read-only", discovery, project, conversations: threads, nextCursor: page.nextCursor, hasMore: page.nextCursor !== null || page.truncated, truncated: page.truncated, total: page.total, selected });
 }
 
 const sendAllowed = (env, identity) => String(env.T3_SEND_EMAILS || "").toLowerCase().split(",").map((x) => x.trim()).filter(Boolean).includes(String(identity?.email || "").toLowerCase());
