@@ -713,6 +713,7 @@ console.log("all tests passed");
     if (call.params.name === "t3_project_read") return Response.json({ jsonrpc: "2.0", id: call.id, result: { structuredContent: { project: { id: projectId, workspaceRoot: "/projects/glb-viewer" } } } });
     if (call.params.name === "t3_project_list") return Response.json({ jsonrpc: "2.0", id: call.id, result: { structuredContent: { projects: listedProjects } } });
     if (call.params.name === "t3_thread_read") return Response.json({ jsonrpc: "2.0", id: call.id, result: { structuredContent: { thread: { threadId: "th-1", projectId: threadProject } } } });
+    if (call.params.name === "t3_thread_launch") { sent.push({ launch: call.params.arguments }); return Response.json({ jsonrpc: "2.0", id: call.id, result: { structuredContent: { thread: { threadId: "th-new" } } } }); }
     if (call.params.name === "t3_thread_send") { sent.push(call.params.arguments); return Response.json({ jsonrpc: "2.0", id: call.id, result: { structuredContent: { ok: true } } }); }
     throw Error("unexpected tool " + call.params.name);
   };
@@ -740,5 +741,11 @@ console.log("all tests passed");
   await assert.rejects(() => liveSend(sendRequest(), autoEnv, owner, repo, makeFetch("mcp:a", sent)), (e) => e.code === "thread_mismatch", "the newest duplicate (/b) is used, so a thread of the older /a is refused");
   await liveSend(sendRequest(), autoEnv, owner, repo, makeFetch("mcp:b", sent));
   assert.equal(sent.length, 2, "sending into the newest duplicate works");
+  listedProjects = [{ id: projectId, workspaceRoot: "/projects/glb-viewer", repositoryIdentity: { canonicalKey: "github.com/swamp2k/glb-viewer" } }];
+  const launchReq = new Request("https://board.example/api/t3?repoId=R_kgDOUSfguQ", { method: "POST", headers: { cookie: `__Host-repo-board-t3=${sid}`, "content-type": "application/json", "x-repo-board-csrf": "csrf-1" }, body: JSON.stringify({ csrf: "csrf-1", action: "launch", message: "Check NOW.md" }) });
+  const launchedRes = await (await liveSend(launchReq, autoEnv, owner, repo, makeFetch(projectId, sent))).json();
+  assert.equal(launchedRes.threadId, "th-new");
+  const launchArgs = sent.at(-1).launch;
+  assert.equal(launchArgs.projectId, projectId); assert.equal(launchArgs.message, "Check NOW.md"); assert.equal(launchArgs.runtimeMode, undefined, "mode is inherited, never raised");
   console.log("live send allowlist, operate grant, CSRF and project membership checks ok");
 }
