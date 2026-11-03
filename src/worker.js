@@ -170,8 +170,8 @@ function card(r, now, t3Enabled = false) {
   const warn = prList.length
     ? `<div class="warn">${r.pullRequests.totalCount} open PR${r.pullRequests.totalCount > 1 ? "s" : ""}: decide before retiring</div>` : "";
   const fields = n
-    ? ["doing", "state", "next step", "blocked by"]
-        .filter((f) => n[f])
+    ? ["doing", "next step", "blocked by"]
+        .filter((f) => n[f] && !(f === "blocked by" && /^(nothing|none|no)\b/i.test(n[f].trim())))
         .map((f) => `<div class="f"><b>${f[0].toUpperCase() + f.slice(1)}</b> ${esc(n[f])}</div>`).join("")
     : `<div class="f muted">No NOW.md yet</div>`;
   return `<article class="card" style="--dust:${dust.toFixed(2)}">
