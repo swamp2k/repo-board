@@ -32,7 +32,14 @@ const html = renderBoard([
 assert(html.includes("1 open PR: decide before retiring"));
 assert(html.includes("kids loved it, done"));
 assert(html.includes("ask me what to do with each"));
-assert(html.indexOf("Decide") < html.indexOf("Waiting for review"));
+assert(html.includes("Needs me") && html.includes("Parked") && html.includes('class="strip"'), "four columns, a parked shelf and a count strip");
+assert(html.includes("1 needs me"));
+assert(/No bookmark yet/.test(html.slice(0, html.indexOf('id="parked"'))), "No bookmark yet stays outside the parked shelf");
+assert(html.indexOf('id="parked"') > html.indexOf('id="nobookmark"'));
+assert.equal(laneFor(repo({ now: { text: "Doing: x\nNext step: No outstanding work; await requests" } }), now), "done");
+assert.equal(laneFor(repo({ now: { text: "Doing: x\nNext step: none" } }), now), "done");
+assert.equal(laneFor(repo({ now: { text: "Doing: x\nNext step: Nothing is ready yet, write the spec" } }), now), "progress");
+assert.equal(laneFor(repo({ now: { text: "Doing: x\nNext step: cut a release" } }), now), "progress");
 console.log("all tests passed");
 
 // Exercise the real Worker fetch path: live mode must reach the page unchanged,

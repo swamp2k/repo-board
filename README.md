@@ -2,12 +2,14 @@
 
 One card per GitHub repo, sorted into lanes from each repo's `NOW.md` and open PRs.
 
-Lanes:
-- **Waiting for review** – the repo has an open PR
+What you see: four columns, a count strip at the top, and a closed **Parked** shelf.
+- **Needs me** – the repo has an open PR (split into *Decide* when the PR is stale and *Waiting for review* when it is fresh)
 - **In progress** – has a NOW.md, touched within 14 days
 - **Paused** – has a NOW.md, untouched for more than 14 days
-- **No bookmark yet** – no NOW.md, touched within 30 days
-- **Gathering dust** – no NOW.md, untouched for more than 30 days (collapsed)
+- **No bookmark yet** – no NOW.md, touched within 30 days. Kept visible on purpose, as a nag to add one.
+- **Parked** (collapsed) – *Done* (NOW.md `Next step` says none / nothing outstanding / done), *Gathering dust* (no NOW.md, untouched 30+ days) and *Graveyard* (archived)
+
+Cards show only **Doing**, **Next step** and **Blocked by** (when something is blocked). The `State` line is never shown.
 
 Cards fade the longer they go untouched. "Resume" copies a prompt to paste into Claude Code or Codex.
 

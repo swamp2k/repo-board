@@ -88,6 +88,9 @@ export function parseNow(text) {
 }
 
 const PR_STALE_DAYS = 14;
+// A repo is "done" when its NOW.md Next step says there is nothing left to do.
+const DONE_NEXT = /^(none|nothing (outstanding|left|more|to do|further)|no (further|outstanding|remaining|more)|n\/a|done|complete|completed|finished)\b/i;
+function isDone(now) { const next = parseNow(now?.text)?.["next step"]; return !!next && DONE_NEXT.test(next.trim()); }
 
 export function laneFor(repo, now) {
   if (repo.isArchived) return "graveyard";
@@ -97,7 +100,7 @@ export function laneFor(repo, now) {
     const freshest = Math.max(...prs.map((p) => Date.parse(p.updatedAt)));
     return now - freshest <= PR_STALE_DAYS * DAY ? "review" : "decide";
   }
-  if (repo.now) return days <= 14 ? "progress" : "paused";
+  if (repo.now) return isDone(repo.now) ? "done" : days <= 14 ? "progress" : "paused";
   return days <= 30 ? "nobookmark" : "dusty";
 }
 
@@ -107,21 +110,37 @@ const LANES = [
   ["progress", "In progress"],
   ["paused", "Paused"],
   ["nobookmark", "No bookmark yet"],
+  ["done", "Done"],
   ["dusty", "Gathering dust"],
   ["graveyard", "Graveyard"],
 ];
-const CLOSED = new Set(["dusty", "graveyard"]);
+// What you see: four columns plus a closed "Parked" shelf. "No bookmark yet" stays visible on purpose (a nag).
+const COLUMNS = [
+  ["needs", "Needs me", ["decide", "review"]],
+  ["progress", "In progress", ["progress"]],
+  ["paused", "Paused", ["paused"]],
+  ["nobookmark", "No bookmark yet", ["nobookmark"]],
+];
+const SHELF = ["done", "dusty", "graveyard"];
 
 export function renderBoard(repos, now, t3Enabled = false) {
   const groups = Object.fromEntries(LANES.map(([k]) => [k, []]));
   for (const r of repos) groups[laneFor(r, now)].push(r);
-
-  return LANES.map(([k, title]) => {
-    const items = groups[k];
-    const body = items.map((r) => card(r, now, t3Enabled)).join("") || `<p class="empty">Nothing here</p>`;
-    const open = CLOSED.has(k) ? "" : " open";
-    return `<details class="lane lane-${k}"${open}><summary>${title} <span class="n">${items.length}</span></summary><div class="cards">${body}</div></details>`;
+  const title = Object.fromEntries(LANES);
+  const cards = (k) => groups[k].map((r) => card(r, now, t3Enabled)).join("");
+  const count = (keys) => keys.reduce((n, k) => n + groups[k].length, 0);
+  const section = (k, heading) => groups[k].length ? `<h3 class="sub">${heading} <span class="n">${groups[k].length}</span></h3>${cards(k)}` : "";
+  const shelfCount = count(SHELF);
+  const strip = `<nav class="strip">${COLUMNS.map(([id, name, keys]) => `<a href="#${id}">${count(keys)} ${name.toLowerCase()}</a>`).join(" · ")} · <a href="#parked" data-open>${shelfCount} parked</a></nav>`;
+  const columns = COLUMNS.map(([id, name, keys]) => {
+    const total = count(keys);
+    const body = keys.length > 1
+      ? keys.map((k) => section(k, title[k])).join("")
+      : cards(keys[0]);
+    return `<details class="lane lane-${id}" id="${id}" open><summary>${name} <span class="n">${total}</span></summary><div class="cards">${body || `<p class="empty">Nothing here</p>`}</div></details>`;
   }).join("");
+  const shelf = `<details class="lane lane-parked" id="parked"><summary>Parked <span class="n">${shelfCount}</span></summary><div class="cards">${SHELF.map((k) => section(k, title[k])).join("") || `<p class="empty">Nothing here</p>`}</div></details>`;
+  return strip + columns + shelf;
 }
 
 // Plain data for Nexus (no HTML). Same lanes, same prompts as the web page.
@@ -218,7 +237,7 @@ export function page(inner, t3Enabled = false) {
 @media (prefers-color-scheme:dark){:root{--bg:#161614;--card:#22221f;--ink:#ecebe6;--mut:#9a988f;--line:#33322e;--acc:#fb923c}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,sans-serif}
 h1{font-size:18px;margin:16px}h1 a{font-size:13px;color:var(--mut);margin-left:8px}
-main{display:flex;gap:12px;overflow-x:auto;padding:0 16px 24px;align-items:flex-start}
+main{display:flex;flex-wrap:wrap;gap:12px;overflow-x:auto;padding:0 16px 24px;align-items:flex-start}
 .lane{flex:0 0 300px;background:color-mix(in srgb,var(--line) 40%,transparent);border-radius:10px;padding:8px}
 summary{font-weight:600;cursor:pointer;padding:4px}.n{color:var(--mut);font-weight:400}
 .cards{display:flex;flex-direction:column;gap:8px;margin-top:6px}
@@ -232,7 +251,7 @@ summary{font-weight:600;cursor:pointer;padding:4px}.n{color:var(--mut);font-weig
 button{background:var(--acc);color:#fff;border:0;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer}
 .btns{display:flex;flex-wrap:wrap;gap:6px}.card footer{flex-wrap:wrap;gap:6px}.ghost{background:transparent;color:var(--mut);border:1px solid var(--line)}
 .warn{font-size:12px;color:var(--acc);margin-top:6px}
-.lane-decide summary{color:var(--acc)}.grave{opacity:.6}.grave header a{text-decoration:line-through}
+.lane-needs summary{color:var(--acc)}.sub{font-size:13px;color:var(--mut);margin:8px 0 0}.strip{flex:0 0 100%;font-size:13px;color:var(--mut)}.strip a{color:var(--ink)}.grave{opacity:.6}.grave header a{text-decoration:line-through}
 .empty{color:var(--mut);font-size:13px;margin:4px}.err{margin:16px;color:var(--acc)}
 .t3-backdrop{position:fixed;inset:0;background:#0008;z-index:10}.t3-panel{position:fixed;z-index:11;inset:0 0 0 auto;width:min(520px,100vw);height:100dvh;max-width:100vw;max-height:100dvh;margin:0;overflow:auto;background:var(--bg);color:var(--ink);border:0;border-left:1px solid var(--line);padding:18px;box-shadow:-8px 0 30px #0003}
 .t3-panel h2{font-size:19px;margin:0}.t3-top{display:flex;justify-content:space-between;gap:12px;align-items:start}.t3-muted{color:var(--mut);font-size:13px}.t3-warning{margin:12px 0;padding:8px;border:1px solid var(--acc);border-radius:6px;color:var(--acc)}
@@ -242,7 +261,7 @@ button{background:var(--acc);color:#fff;border:0;border-radius:6px;padding:4px 1
 </style></head><body><h1>Repo Board<a href="/?refresh">refresh</a></h1><main>${inner}</main>
 ${t3Active ? `<dialog class="t3-panel" id="t3-panel" aria-labelledby="t3-title"><div class="t3-top"><div><h2 id="t3-title">${t3Live ? "T3 conversations" : "Run in T3"}</h2><a id="t3-repo" class="t3-muted" target="_blank" rel="noopener"></a></div><button id="t3-close" class="ghost" type="button">Close</button></div><a id="t3-now-link" class="t3-muted" target="_blank" rel="noopener">NOW.md</a><p id="t3-now" class="t3-muted"></p><p id="t3-scope" class="t3-muted"></p>${t3Live ? `<span class="t3-badge" id="t3-badge" title="Reading always works. Sending needs T3 permission beyond read only.">glb-viewer pilot</span> <button id="t3-connect" type="button">Connect to T3</button><button id="t3-disconnect" class="ghost" type="button" hidden>Disconnect</button>` : `<div class="t3-warning">Mock mode: conversations, statuses, and activity are simulated. No T3 agent is contacted.</div>`}<p id="t3-status" class="t3-status">Connection: disconnected</p><p id="t3-error" role="alert" class="err" hidden></p><button id="t3-retry" class="ghost" type="button" hidden>${t3Live ? "Retry read" : "Retry connection"}</button><div id="t3-list" class="t3-list" aria-live="polite"></div>${t3Live ? "" : `<button id="t3-new" type="button">New mock conversation</button><form id="t3-form" class="t3-form"><label for="t3-message">Follow-up</label><textarea id="t3-message" maxlength="4000" required></textarea><button type="submit">Send mock follow-up</button></form><h3>Activity</h3><div id="t3-activity" class="t3-muted">No activity loaded.</div>`}</dialog>` : ""}
 <script>
-document.addEventListener("click",e=>{const b=e.target.closest("button[data-p]");if(b){navigator.clipboard.writeText(b.dataset.p).then(()=>{b.textContent="Copied";setTimeout(()=>b.textContent=b.dataset.l,1500)});return;}});
+document.addEventListener("click",e=>{const o=e.target.closest("a[data-open]");if(o){const t=document.getElementById(o.hash.slice(1));if(t)t.open=true}const b=e.target.closest("button[data-p]");if(b){navigator.clipboard.writeText(b.dataset.p).then(()=>{b.textContent="Copied";setTimeout(()=>b.textContent=b.dataset.l,1500)});return;}});
 ${t3Mock ? `(()=>{
 const ClientFactory=(${createT3Client.toString()})();
 const client=new ClientFactory({storage:localStorage,transport:async(repoId,body)=>{const r=await fetch("/api/t3?repoId="+encodeURIComponent(repoId),{method:"POST",headers:{"content-type":"application/json","x-repo-board-request":"1"},body:JSON.stringify(body)});const j=await r.json();if(!r.ok)throw Error(j.error?.message||"Mock service unavailable");return j;}});
