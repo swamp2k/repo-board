@@ -38,7 +38,11 @@ export default {
       });
     }
     const doneResponse = await handleDone(request, env, { authenticate: verifyAccess });
-    if (doneResponse) return doneResponse;
+    if (doneResponse) {
+      // After a successful edit, drop the cached board so the next load is fresh.
+      if (doneResponse.ok) for (const m of ["disabled", "mock", "live"]) ctx.waitUntil(caches.default.delete(new Request(url.origin + "/__board?mode=" + m)));
+      return doneResponse;
+    }
     if (url.pathname !== "/") return new Response("Not found", { status: 404 });
 
     const cache = caches.default;
@@ -46,7 +50,7 @@ export default {
     const key = new Request(url.origin + "/__board?mode=" + mode, request);
     if (!url.searchParams.has("refresh")) {
       const hit = await cache.match(key);
-      if (hit) return hit;
+      if (hit) return new Response(hit.body, { status: hit.status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "private, no-cache" } });
     }
 
     let repos;
@@ -58,11 +62,10 @@ export default {
       });
     }
 
-    const res = new Response(page(renderBoard(repos, Date.now(), mode), mode), {
-      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "private, max-age=60" },
-    });
-    ctx.waitUntil(cache.put(key, res.clone()));
-    return res;
+    const html = page(renderBoard(repos, Date.now(), mode), mode);
+    // The edge keeps the page for 60 s; browsers always revalidate so a reload is never stale.
+    ctx.waitUntil(cache.put(key, new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "private, max-age=60" } })));
+    return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "private, no-cache" } });
   },
 };
 
@@ -274,7 +277,8 @@ button{background:var(--acc);color:#fff;border:0;border-radius:6px;padding:4px 1
 </style></head><body><h1>Repo Board<a href="/?refresh">refresh</a></h1><main>${inner}</main>
 ${t3Active ? `<dialog class="t3-panel" id="t3-panel" aria-labelledby="t3-title"><div class="t3-top"><div><h2 id="t3-title">${t3Live ? "T3 conversations" : "Run in T3"}</h2><a id="t3-repo" class="t3-muted" target="_blank" rel="noopener"></a></div><button id="t3-close" class="ghost" type="button">Close</button></div><a id="t3-now-link" class="t3-muted" target="_blank" rel="noopener">NOW.md</a><p id="t3-now" class="t3-muted"></p><p id="t3-scope" class="t3-muted"></p>${t3Live ? `<span class="t3-badge" id="t3-badge" title="Reading always works. Sending needs T3 permission beyond read only.">glb-viewer pilot</span> <button id="t3-connect" type="button">Connect to T3</button><button id="t3-disconnect" class="ghost" type="button" hidden>Disconnect</button>` : `<div class="t3-warning">Mock mode: conversations, statuses, and activity are simulated. No T3 agent is contacted.</div>`}<p id="t3-status" class="t3-status">Connection: disconnected</p><p id="t3-error" role="alert" class="err" hidden></p><button id="t3-retry" class="ghost" type="button" hidden>${t3Live ? "Retry read" : "Retry connection"}</button><div id="t3-list" class="t3-list" aria-live="polite"></div>${t3Live ? "" : `<button id="t3-new" type="button">New mock conversation</button><form id="t3-form" class="t3-form"><label for="t3-message">Follow-up</label><textarea id="t3-message" maxlength="4000" required></textarea><button type="submit">Send mock follow-up</button></form><h3>Activity</h3><div id="t3-activity" class="t3-muted">No activity loaded.</div>`}</dialog>` : ""}
 <script>
-document.addEventListener("click",async e=>{const d=e.target.closest("button[data-done]");if(d){if(d.textContent!=="Click again to mark done"){d.textContent="Click again to mark done";setTimeout(()=>{if(!d.disabled)d.textContent="Mark done"},5000);return}d.disabled=true;d.textContent="Saving…";try{const r=await fetch("/api/done",{method:"POST",headers:{"content-type":"application/json","x-repo-board-request":"1"},body:JSON.stringify({name:d.dataset.done})});if(r.ok){location.href="/?refresh";return}const j=await r.json().catch(()=>({}));try{await navigator.clipboard.writeText(d.dataset.fallback)}catch{}d.title=j.error?.message||"Could not save";d.textContent="Not saved - prompt copied";d.disabled=false}catch{d.textContent="Not saved";d.disabled=false}return}
+function moveDone(btn){const card=btn.closest("article.card"),col=card.closest("details.lane"),shelf=document.getElementById("parked");const n=(el,by)=>{const c=el.querySelector(":scope > summary .n, :scope > .n");if(c)c.textContent=String(Math.max(0,Number(c.textContent)+by))};for(const f of card.querySelectorAll(".f")){if(f.firstElementChild?.textContent==="Next step"){f.replaceChildren(Object.assign(document.createElement("b"),{textContent:"Next step"}),document.createTextNode(" Done"))}}btn.remove();if(!col||col.id==="needs"||!shelf){const t=document.createElement("span");t.className="muted";t.textContent="Done saved. It leaves this column when the PR is closed.";card.querySelector("footer")?.before(t);return}const cards=shelf.querySelector(".cards");cards.querySelector(":scope > .empty")?.remove();let head=[...cards.querySelectorAll(":scope > h3.sub")].find(h=>h.firstChild?.textContent.trim()==="Done");if(!head){head=document.createElement("h3");head.className="sub";head.append("Done ");const c=document.createElement("span");c.className="n";c.textContent="0";head.append(c);cards.prepend(head)}head.after(card);const hc=head.querySelector(".n");hc.textContent=String(Number(hc.textContent)+1);n(col,-1);n(shelf,1);if(!col.querySelector(".cards > article")){const p=document.createElement("p");p.className="empty";p.textContent="Nothing here";col.querySelector(".cards").append(p)}const strip=document.querySelector("nav.strip");if(strip)for(const a of strip.querySelectorAll("a")){const m=a.getAttribute("href");if(m==="#"+col.id)a.textContent=a.textContent.replace(/^[0-9]+/,x=>String(Math.max(0,Number(x)-1)));if(m==="#parked")a.textContent=a.textContent.replace(/^[0-9]+/,x=>String(Number(x)+1))}}
+document.addEventListener("click",async e=>{const d=e.target.closest("button[data-done]");if(d){if(d.textContent!=="Click again to mark done"){d.textContent="Click again to mark done";setTimeout(()=>{if(!d.disabled)d.textContent="Mark done"},5000);return}d.disabled=true;d.textContent="Saving…";try{const r=await fetch("/api/done",{method:"POST",headers:{"content-type":"application/json","x-repo-board-request":"1"},body:JSON.stringify({name:d.dataset.done})});if(r.ok){moveDone(d);return}const j=await r.json().catch(()=>({}));try{await navigator.clipboard.writeText(d.dataset.fallback)}catch{}d.title=j.error?.message||"Could not save";d.textContent="Not saved - prompt copied";d.disabled=false}catch{d.textContent="Not saved";d.disabled=false}return}
 const o=e.target.closest("a[data-open]");if(o){const t=document.getElementById(o.hash.slice(1));if(t)t.open=true}const b=e.target.closest("button[data-p]");if(b){navigator.clipboard.writeText(b.dataset.p).then(()=>{b.textContent="Copied";setTimeout(()=>b.textContent=b.dataset.l,1500)});return;}});
 ${t3Mock ? `(()=>{
 const ClientFactory=(${createT3Client.toString()})();
