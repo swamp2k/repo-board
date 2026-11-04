@@ -765,7 +765,9 @@ console.log("all tests passed");
 // Mark done: one small, guarded edit of NOW.md.
 {
   assert.equal(markDone("Doing: a\nNext step: b\nUpdated: 2026-01-01\n", "2026-11-04"), "Doing: a\nNext step: Done\nUpdated: 2026-11-04\n");
-  assert.equal(markDone("Doing: a\n", "2026-11-04"), "Doing: a\nNext step: Done\nUpdated: 2026-11-04\n", "missing lines are added");
+  assert.equal(markDone("Doing: a\n", "2026-11-04"), "Doing: a\n\nNext step: Done\n\nUpdated: 2026-11-04\n", "missing lines are added as their own paragraphs");
+  assert.equal(markDone("**Doing:** a\n\n**Next step:** pick\n\n**Updated:** 2026-11-01 Next step: Done Updated: 2026-11-04\nNext step: Done\n", "2026-11-05"), "**Doing:** a\n\n**Next step:** Done\n\n**Updated:** 2026-11-05\n", "markdown labels are edited in place and earlier duplicates are cleaned up");
+  assert.equal(parseNow("**Doing:** a\n- **Next step**: b")["next step"], "b", "markdown labels are read");
   const env = { BOARD_ORIGIN: "https://board.example", DONE_EMAILS: "owner@example.com", GITHUB_TOKEN: "ghp_secret" };
   const b64 = (t) => Buffer.from(t).toString("base64");
   const mk = (body, headers = {}) => new Request("https://board.example/api/done", { method: "POST", headers: { origin: "https://board.example", "content-type": "application/json", "x-repo-board-request": "1", ...headers }, body: JSON.stringify(body) });
@@ -780,7 +782,7 @@ console.log("all tests passed");
   assert.equal(ok.status, 200);
   const put = calls.find((c) => c.method === "PUT");
   assert(put.url.endsWith("/repos/swamp2k/glb-viewer/contents/NOW.md") && put.body.sha === "sha1");
-  assert.equal(Buffer.from(put.body.content, "base64").toString(), "Doing: a\nNext step: Done\nUpdated: 2026-11-04\n");
+  assert.equal(Buffer.from(put.body.content, "base64").toString(), "Doing: a\nNext step: Done\n\nUpdated: 2026-11-04\n");
   const reject = async (req, auth, code, status) => { const r = await handleDone(req, env, { authenticate: auth, fetcher: gh() }); assert.equal(r.status, status); assert.equal((await r.json()).error.code, code); };
   const before = calls.length;
   await reject(mk({ name: "x" }, { origin: "https://evil.example" }), asOwner, "request_rejected", 403);

@@ -4,13 +4,22 @@ const OWNER = "swamp2k";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const reply = (status, code, message, extra = {}) => new Response(JSON.stringify(status < 400 ? { ok: true, ...extra } : { error: { code, message } }), { status, headers: JSON_HEADERS });
 
+// Line-based so markdown labels work too ("**Next step:** x", "- Next step: x").
+// The first matching line is rewritten (keeping its label style); later duplicates are removed.
 export function markDone(text, today) {
-  let next = text;
-  const nextLine = /^(\s*Next step\s*:).*$/im;
-  next = nextLine.test(next) ? next.replace(nextLine, "$1 Done") : next.replace(/\s*$/, "\n") + "Next step: Done\n";
-  const updated = /^(\s*Updated\s*:).*$/im;
-  next = updated.test(next) ? next.replace(updated, `$1 ${today}`) : next.replace(/\s*$/, "\n") + `Updated: ${today}\n`;
-  return next;
+  const label = (name) => new RegExp(`^(\\s*(?:[-*]\\s+)?(?:\\*\\*|__)?${name}(?:\\*\\*|__)?\\s*:(?:\\*\\*|__)?)`, "i");
+  const lines = text.replace(/\r\n/g, "\n").replace(/\n+$/, "").split("\n");
+  for (const [name, value] of [["Next step", "Done"], ["Updated", today]]) {
+    const re = label(name);
+    let seen = false;
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(re);
+      if (!m) continue;
+      if (!seen) { lines[i] = `${m[1]} ${value}`; seen = true; } else { lines.splice(i, 1); i--; }
+    }
+    if (!seen) lines.push("", `${name}: ${value}`);
+  }
+  return lines.join("\n") + "\n";
 }
 
 const toBase64 = (text) => { const bytes = new TextEncoder().encode(text); let bin = ""; for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode(...bytes.subarray(i, i + 8192)); return btoa(bin); };

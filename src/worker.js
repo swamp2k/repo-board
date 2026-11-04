@@ -87,8 +87,9 @@ export function parseNow(text) {
   if (!text) return null;
   const out = {};
   for (const line of text.split("\n")) {
-    const m = line.match(/^\s*(Doing|State|Next step|Blocked by|Updated|Epitaph)\s*:\s*(.+)$/i);
-    if (m) out[m[1].toLowerCase()] = m[2].trim();
+    // Accept plain "Doing: x" and markdown like "**Doing:** x" or "- **Doing**: x".
+    const m = line.replace(/\*\*|__/g, "").match(/^\s*(?:[-*]\s+)?(Doing|State|Next step|Blocked by|Updated|Epitaph)\s*:\s*(.+)$/i);
+    if (m && !(m[1].toLowerCase() in out)) out[m[1].toLowerCase()] = m[2].trim();
   }
   return out;
 }
