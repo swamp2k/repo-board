@@ -1,6 +1,6 @@
 ## Where I left off
-Doing: Add AGENTS.md/CLAUDE.md alignment to both Copy prompt variants
-State: Committed and deployed (e97244096c6048439685911bd1eda4d9). Both prompts check root uppercase filenames, create identical files if neither exists, copy if only one exists, propose a merge and wait for Martin if contents differ, and keep future updates identical. Nested instructions remain unchanged. npm test and targeted checks of both prompt variants pass.
-Next step: Merge, run npx wrangler deploy, then deploy Nexus.
-Blocked by: authenticated live clipboard verification requires Martin's login.
-Updated: 2026-11-01
+Doing: Simplify the board layout: four columns, count strip, Parked shelf, Done lane
+State: Board shows Needs me, In progress, Paused, No bookmark yet and a collapsed Parked shelf (Done, Gathering dust, Graveyard). Cards hide State. T3 is parked: deploy wrangler.pilot.rollback.toml to turn it off; the T3 code stays on this branch. Tests pass.
+Next step: Deploy; try Retire on an unwanted repo. If it says the token may not archive, add Administration: write to the GITHUB_TOKEN. Keep PR #3 draft.
+Blocked by: Nothing.
+Updated: 2026-11-03
