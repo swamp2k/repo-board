@@ -13,7 +13,7 @@ Cards show only **Doing**, **Next step** and **Blocked by** (when something is b
 
 Cards fade the longer they go untouched. "Resume" copies a prompt to paste into Claude Code or Codex.
 
-It reads from GitHub. The only thing it writes is the **Mark done** button, which sets `Next step: Done` (and the `Updated:` date) in one repo's NOW.md with a single small commit. That button works only for the emails in `DONE_EMAILS`, uses the same `GITHUB_TOKEN` secret (which therefore needs "Contents: write"), and falls back to a copied prompt if GitHub refuses (for example a protected branch).
+It reads from GitHub. It writes only through two buttons. **Retire** asks for an epitaph, writes `Epitaph:` to NOW.md and archives the repo (refused while PRs are open; needs "Administration: write" on the token). **Mark done**, which sets `Next step: Done` (and the `Updated:` date) in one repo's NOW.md with a single small commit. That button works only for the emails in `DONE_EMAILS`, uses the same `GITHUB_TOKEN` secret (which therefore needs "Contents: write"), and falls back to a copied prompt if GitHub refuses (for example a protected branch).
 
 ## Optional T3 workspace panel
 

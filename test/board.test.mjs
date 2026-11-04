@@ -4,7 +4,7 @@ import { canonicalRepo, resolveProject, verifyAccess, handleT3Request } from "..
 import { createT3Client } from "../src/t3-client.js";
 import { handleT3AuthRequest, liveRead, liveSend, T3AuthStore } from "../src/t3-live.js";
 import { runInNewContext } from "node:vm";
-import { handleDone, markDone } from "../src/done.js";
+import { handleDone, markDone, withEpitaph } from "../src/done.js";
 
 const now = Date.parse("2026-10-31T14:00:00Z");
 const d = (n) => new Date(now - n * 86400000).toISOString();
@@ -796,5 +796,26 @@ console.log("all tests passed");
   const already = await handleDone(mk({ name: "r" }), env, { authenticate: asOwner, fetcher: gh(200, "Next step: Done\nUpdated: 2026-11-04\n"), now: () => new Date("2026-11-04T10:00:00Z") });
   assert.equal((await already.json()).unchanged, true);
   assert.equal(await handleDone(new Request("https://board.example/"), env, {}), null);
+  assert.equal(withEpitaph("**Doing:** a\n", "kids loved it"), "**Doing:** a\n\nEpitaph: kids loved it\n");
+  const rcalls = [];
+  const rgh = (prs = [], archStatus = 200) => async (url, init = {}) => {
+    rcalls.push({ url, method: init.method || "GET", body: init.body ? JSON.parse(init.body) : null });
+    if (url.includes("/pulls")) return Response.json(prs);
+    if (url.endsWith("/NOW.md") && !init.method) return Response.json({ sha: "s1", encoding: "base64", content: b64("Doing: a\n") });
+    if (init.method === "PATCH") return new Response("{}", { status: archStatus });
+    return new Response("{}", { status: 200 });
+  };
+  const rq = (body) => new Request("https://board.example/api/retire", { method: "POST", headers: { origin: "https://board.example", "content-type": "application/json", "x-repo-board-request": "1" }, body: JSON.stringify(body) });
+  const retired = await handleDone(rq({ name: "old", epitaph: "kids loved it" }), env, { authenticate: asOwner, fetcher: rgh() });
+  assert.equal((await retired.json()).retired, true);
+  const order = rcalls.map((c) => c.method);
+  assert.deepEqual(order, ["GET", "GET", "PUT", "PATCH"], "PR check, read, epitaph write, then archive");
+  assert.equal(rcalls[3].body.archived, true);
+  rcalls.length = 0;
+  assert.equal((await (await handleDone(rq({ name: "old", epitaph: "x" }), env, { authenticate: asOwner, fetcher: rgh([{ number: 1 }]) })).json()).error.code, "open_prs");
+  assert(!rcalls.some((c) => c.method !== "GET"), "nothing is written when PRs are open");
+  assert.equal((await (await handleDone(rq({ name: "old", epitaph: "" }), env, { authenticate: asOwner, fetcher: rgh() })).json()).error.code, "invalid_epitaph");
+  assert.equal((await (await handleDone(rq({ name: "old", epitaph: "x" }), env, { authenticate: asOwner, fetcher: rgh([], 403) })).json()).error.code, "github_no_archive");
+  assert.equal((await handleDone(rq({ name: "old", epitaph: "x" }), env, { authenticate: async () => ({ sub: "s", email: "wife@example.com" }), fetcher: rgh() })).status, 403);
   console.log("mark done edit and guard checks ok");
 }

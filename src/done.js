@@ -27,7 +27,7 @@ const fromBase64 = (b64) => new TextDecoder().decode(Uint8Array.from(atob(b64.re
 
 export async function handleDone(request, env, { authenticate, fetcher = fetch, now = () => new Date() } = {}) {
   const url = new URL(request.url);
-  if (url.pathname !== "/api/done") return null;
+  if (url.pathname !== "/api/done" && url.pathname !== "/api/retire") return null;
   if (request.method !== "POST") return reply(405, "method_not_allowed", "Use the Mark done button");
   try { new URL(env.BOARD_ORIGIN || ""); } catch { return reply(503, "not_configured", "Mark done is not configured"); }
   if (request.headers.get("origin") !== new URL(env.BOARD_ORIGIN).origin || request.headers.get("x-repo-board-request") !== "1" || !/^application\/json/i.test(request.headers.get("content-type") || "")) return reply(403, "request_rejected", "Request could not be verified");
@@ -38,11 +38,12 @@ export async function handleDone(request, env, { authenticate, fetcher = fetch, 
   if (!env.GITHUB_TOKEN) return reply(503, "not_configured", "GitHub token is not set");
   const raw = await request.text();
   if (raw.length > 1000) return reply(413, "too_large", "Request is too large");
-  let name;
-  try { name = JSON.parse(raw)?.name; } catch { /* handled below */ }
+  let name, body = {};
+  try { body = JSON.parse(raw) || {}; name = body.name; } catch { /* handled below */ }
   if (typeof name !== "string" || !/^[A-Za-z0-9._-]{1,100}$/.test(name) || name === "." || name === "..") return reply(400, "invalid_repo", "Repository name is invalid");
   const api = `https://api.github.com/repos/${OWNER}/${name}/contents/NOW.md`;
   const headers = { authorization: `Bearer ${env.GITHUB_TOKEN}`, accept: "application/vnd.github+json", "user-agent": "repo-board", "x-github-api-version": "2022-11-28" };
+  if (url.pathname === "/api/retire") return retire(name, body, headers, api, fetcher, now);
   let file;
   try {
     const got = await fetcher(api, { headers, signal: AbortSignal.timeout(8_000) });
@@ -62,4 +63,37 @@ export async function handleDone(request, env, { authenticate, fetcher = fetch, 
     if (!put.ok) return reply(502, "github_unavailable", `GitHub answered HTTP ${put.status} when saving NOW.md`);
   } catch { return reply(502, "github_unavailable", "Could not reach GitHub"); }
   return reply(200, "", "", { done: true });
+}
+
+export function withEpitaph(text, epitaph) {
+  const lines = (text || "# NOW\n").replace(/\r\n/g, "\n").replace(/\n+$/, "").split("\n");
+  const re = /^(\s*(?:[-*]\s+)?(?:\*\*|__)?Epitaph(?:\*\*|__)?\s*:(?:\*\*|__)?)/i;
+  const i = lines.findIndex((l) => re.test(l));
+  if (i >= 0) lines[i] = `${lines[i].match(re)[1]} ${epitaph}`; else lines.push("", `Epitaph: ${epitaph}`);
+  return lines.join("\n") + "\n";
+}
+
+// Retire: refuse with open PRs, write the epitaph to NOW.md, then archive the repo (in that order:
+// an archived repo is read-only). Archiving can be undone in the repo's GitHub settings.
+async function retire(name, body, headers, api, fetcher, now) {
+  const epitaph = typeof body.epitaph === "string" ? body.epitaph.trim() : "";
+  if (!epitaph || epitaph.length > 200 || /[\u0000-\u001f]/.test(epitaph)) return reply(400, "invalid_epitaph", "Write a one-line epitaph (up to 200 characters)");
+  const repoApi = `https://api.github.com/repos/${OWNER}/${name}`;
+  const call = async (u, init = {}) => fetcher(u, { ...init, headers: { ...headers, ...(init.body ? { "content-type": "application/json" } : {}) }, signal: AbortSignal.timeout(8_000) });
+  try {
+    const prs = await call(`${repoApi}/pulls?state=open&per_page=1`);
+    if (!prs.ok) return reply(502, "github_unavailable", `GitHub answered HTTP ${prs.status} when checking pull requests`);
+    if ((await prs.json()).length) return reply(409, "open_prs", "This repo has open pull requests. Merge or close them first");
+    const got = await call(api);
+    let sha, before = "";
+    if (got.ok) { const f = await got.json(); sha = f.sha; before = new TextDecoder().decode(Uint8Array.from(atob(String(f.content).replace(/\s/g, "")), (c) => c.charCodeAt(0))); }
+    else if (got.status !== 404) return reply(502, "github_unavailable", `GitHub answered HTTP ${got.status} when reading NOW.md`);
+    const put = await call(api, { method: "PUT", body: JSON.stringify({ message: "Retire: add epitaph to NOW.md (via Repo Board)", content: toBase64(withEpitaph(before, epitaph)), ...(sha ? { sha } : {}) }) });
+    if (put.status === 401 || put.status === 403) return reply(403, "github_no_write", "The GitHub token cannot write to this repository (or the branch is protected)");
+    if (!put.ok) return reply(502, "github_unavailable", `GitHub answered HTTP ${put.status} when saving the epitaph`);
+    const arch = await call(repoApi, { method: "PATCH", body: JSON.stringify({ archived: true }) });
+    if (arch.status === 401 || arch.status === 403 || arch.status === 404) return reply(403, "github_no_archive", "Epitaph saved, but the GitHub token may not archive repos. Give it Administration: write, or archive the repo in its GitHub settings");
+    if (!arch.ok) return reply(502, "github_unavailable", `Epitaph saved, but GitHub answered HTTP ${arch.status} when archiving`);
+  } catch { return reply(502, "github_unavailable", "Could not reach GitHub"); }
+  return reply(200, "", "", { retired: true });
 }
