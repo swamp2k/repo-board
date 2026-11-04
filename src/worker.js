@@ -1,8 +1,9 @@
 // Repo Board — one card per GitHub repo, sorted into lanes from NOW.md + open PRs.
-// One GitHub GraphQL call per page load (cached 60 s). Read-only.
+// One GitHub GraphQL call per page load (cached 60 s). Reads GitHub; the only write is the "Mark done" button (src/done.js).
 import { handleT3Request, verifyAccess, enforceRateLimit } from "./t3.js";
 import { createT3Client } from "./t3-client.js";
 import { handleT3AuthRequest, liveRead, liveSend } from "./t3-live.js";
+import { handleDone } from "./done.js";
 
 const OWNER = "swamp2k";
 const DAY = 86400000;
@@ -36,6 +37,8 @@ export default {
         liveSend: (req, liveEnv, identity, repo) => liveSend(req, liveEnv, identity, repo),
       });
     }
+    const doneResponse = await handleDone(request, env, { authenticate: verifyAccess });
+    if (doneResponse) return doneResponse;
     if (url.pathname !== "/") return new Response("Not found", { status: 404 });
 
     const cache = caches.default;
@@ -206,7 +209,7 @@ function card(r, now, t3Enabled = false) {
     <header><a href="${esc(r.url)}">${esc(r.name)}</a>${r.isPrivate ? `<span class="tag">private</span>` : ""}</header>
     ${fields}${prs}${warn}
     <footer><span class="age">${days === 0 ? "today" : days + " d ago"}</span>
-    <span class="btns">${t3Mode !== "disabled" && r.id && (t3Mode !== "live" || (r.owner?.login === "swamp2k" && r.name === "glb-viewer")) ? `<button class="ghost" data-t3-repo="${esc(r.id)}" data-t3-name="${esc(r.owner?.login || "")}/${esc(r.name)}" data-t3-url="${esc(r.url)}" data-t3-prompt="${esc(t3InspectionPrompt(r))}" data-t3-now="${esc([n?.doing, n?.state, n?.["next step"]].filter(Boolean).join(" · ") || "No NOW.md status available")}" data-t3-has-now="${r.now ? "yes" : "no"}">${t3Mode === "live" ? "T3 conversations" : "Run in T3"}</button>` : ""}${r.now && !isDone(r.now) ? `<button class="ghost" data-p="${esc(done)}" data-l="Mark done">Mark done</button>` : ""}<button class="ghost" data-p="${esc(retire)}" data-l="Retire">Retire</button>
+    <span class="btns">${t3Mode !== "disabled" && r.id && (t3Mode !== "live" || (r.owner?.login === "swamp2k" && r.name === "glb-viewer")) ? `<button class="ghost" data-t3-repo="${esc(r.id)}" data-t3-name="${esc(r.owner?.login || "")}/${esc(r.name)}" data-t3-url="${esc(r.url)}" data-t3-prompt="${esc(t3InspectionPrompt(r))}" data-t3-now="${esc([n?.doing, n?.state, n?.["next step"]].filter(Boolean).join(" · ") || "No NOW.md status available")}" data-t3-has-now="${r.now ? "yes" : "no"}">${t3Mode === "live" ? "T3 conversations" : "Run in T3"}</button>` : ""}${r.now && !isDone(r.now) && t3Mode !== "mock" ? `<button class="ghost" data-done="${esc(r.name)}" data-fallback="${esc(done)}">Mark done</button>` : ""}<button class="ghost" data-p="${esc(retire)}" data-l="Retire">Retire</button>
     <button data-p="${esc(prompt)}" data-l="Copy prompt">Copy prompt</button></span></footer>
   </article>`;
 }
@@ -271,7 +274,8 @@ button{background:var(--acc);color:#fff;border:0;border-radius:6px;padding:4px 1
 </style></head><body><h1>Repo Board<a href="/?refresh">refresh</a></h1><main>${inner}</main>
 ${t3Active ? `<dialog class="t3-panel" id="t3-panel" aria-labelledby="t3-title"><div class="t3-top"><div><h2 id="t3-title">${t3Live ? "T3 conversations" : "Run in T3"}</h2><a id="t3-repo" class="t3-muted" target="_blank" rel="noopener"></a></div><button id="t3-close" class="ghost" type="button">Close</button></div><a id="t3-now-link" class="t3-muted" target="_blank" rel="noopener">NOW.md</a><p id="t3-now" class="t3-muted"></p><p id="t3-scope" class="t3-muted"></p>${t3Live ? `<span class="t3-badge" id="t3-badge" title="Reading always works. Sending needs T3 permission beyond read only.">glb-viewer pilot</span> <button id="t3-connect" type="button">Connect to T3</button><button id="t3-disconnect" class="ghost" type="button" hidden>Disconnect</button>` : `<div class="t3-warning">Mock mode: conversations, statuses, and activity are simulated. No T3 agent is contacted.</div>`}<p id="t3-status" class="t3-status">Connection: disconnected</p><p id="t3-error" role="alert" class="err" hidden></p><button id="t3-retry" class="ghost" type="button" hidden>${t3Live ? "Retry read" : "Retry connection"}</button><div id="t3-list" class="t3-list" aria-live="polite"></div>${t3Live ? "" : `<button id="t3-new" type="button">New mock conversation</button><form id="t3-form" class="t3-form"><label for="t3-message">Follow-up</label><textarea id="t3-message" maxlength="4000" required></textarea><button type="submit">Send mock follow-up</button></form><h3>Activity</h3><div id="t3-activity" class="t3-muted">No activity loaded.</div>`}</dialog>` : ""}
 <script>
-document.addEventListener("click",e=>{const o=e.target.closest("a[data-open]");if(o){const t=document.getElementById(o.hash.slice(1));if(t)t.open=true}const b=e.target.closest("button[data-p]");if(b){navigator.clipboard.writeText(b.dataset.p).then(()=>{b.textContent="Copied";setTimeout(()=>b.textContent=b.dataset.l,1500)});return;}});
+document.addEventListener("click",async e=>{const d=e.target.closest("button[data-done]");if(d){if(d.textContent!=="Click again to mark done"){d.textContent="Click again to mark done";setTimeout(()=>{if(!d.disabled)d.textContent="Mark done"},5000);return}d.disabled=true;d.textContent="Saving…";try{const r=await fetch("/api/done",{method:"POST",headers:{"content-type":"application/json","x-repo-board-request":"1"},body:JSON.stringify({name:d.dataset.done})});if(r.ok){location.href="/?refresh";return}const j=await r.json().catch(()=>({}));try{await navigator.clipboard.writeText(d.dataset.fallback)}catch{}d.title=j.error?.message||"Could not save";d.textContent="Not saved - prompt copied";d.disabled=false}catch{d.textContent="Not saved";d.disabled=false}return}
+const o=e.target.closest("a[data-open]");if(o){const t=document.getElementById(o.hash.slice(1));if(t)t.open=true}const b=e.target.closest("button[data-p]");if(b){navigator.clipboard.writeText(b.dataset.p).then(()=>{b.textContent="Copied";setTimeout(()=>b.textContent=b.dataset.l,1500)});return;}});
 ${t3Mock ? `(()=>{
 const ClientFactory=(${createT3Client.toString()})();
 const client=new ClientFactory({storage:localStorage,transport:async(repoId,body)=>{const r=await fetch("/api/t3?repoId="+encodeURIComponent(repoId),{method:"POST",headers:{"content-type":"application/json","x-repo-board-request":"1"},body:JSON.stringify(body)});const j=await r.json();if(!r.ok)throw Error(j.error?.message||"Mock service unavailable");return j;}});

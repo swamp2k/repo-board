@@ -4,6 +4,7 @@ import { canonicalRepo, resolveProject, verifyAccess, handleT3Request } from "..
 import { createT3Client } from "../src/t3-client.js";
 import { handleT3AuthRequest, liveRead, liveSend, T3AuthStore } from "../src/t3-live.js";
 import { runInNewContext } from "node:vm";
+import { handleDone, markDone } from "../src/done.js";
 
 const now = Date.parse("2026-10-31T14:00:00Z");
 const d = (n) => new Date(now - n * 86400000).toISOString();
@@ -759,4 +760,39 @@ console.log("all tests passed");
   const launchArgs = sent.at(-1).launch;
   assert.equal(launchArgs.projectId, projectId); assert.equal(launchArgs.message, "Check NOW.md"); assert.equal(launchArgs.runtimeMode, undefined, "mode is inherited, never raised");
   console.log("live send allowlist, operate grant, CSRF and project membership checks ok");
+}
+
+// Mark done: one small, guarded edit of NOW.md.
+{
+  assert.equal(markDone("Doing: a\nNext step: b\nUpdated: 2026-01-01\n", "2026-11-04"), "Doing: a\nNext step: Done\nUpdated: 2026-11-04\n");
+  assert.equal(markDone("Doing: a\n", "2026-11-04"), "Doing: a\nNext step: Done\nUpdated: 2026-11-04\n", "missing lines are added");
+  const env = { BOARD_ORIGIN: "https://board.example", DONE_EMAILS: "owner@example.com", GITHUB_TOKEN: "ghp_secret" };
+  const b64 = (t) => Buffer.from(t).toString("base64");
+  const mk = (body, headers = {}) => new Request("https://board.example/api/done", { method: "POST", headers: { origin: "https://board.example", "content-type": "application/json", "x-repo-board-request": "1", ...headers }, body: JSON.stringify(body) });
+  const asOwner = async () => ({ sub: "s", email: "Owner@example.com" });
+  const calls = [];
+  const gh = (putStatus = 200, content = "Doing: a\nNext step: b\n") => async (url, init = {}) => {
+    calls.push({ url, method: init.method || "GET", body: init.body ? JSON.parse(init.body) : null, auth: init.headers.authorization });
+    if (!init.method) return Response.json({ sha: "sha1", encoding: "base64", content: b64(content) });
+    return new Response("{}", { status: putStatus });
+  };
+  const ok = await handleDone(mk({ name: "glb-viewer" }), env, { authenticate: asOwner, fetcher: gh(), now: () => new Date("2026-11-04T10:00:00Z") });
+  assert.equal(ok.status, 200);
+  const put = calls.find((c) => c.method === "PUT");
+  assert(put.url.endsWith("/repos/swamp2k/glb-viewer/contents/NOW.md") && put.body.sha === "sha1");
+  assert.equal(Buffer.from(put.body.content, "base64").toString(), "Doing: a\nNext step: Done\nUpdated: 2026-11-04\n");
+  const reject = async (req, auth, code, status) => { const r = await handleDone(req, env, { authenticate: auth, fetcher: gh() }); assert.equal(r.status, status); assert.equal((await r.json()).error.code, code); };
+  const before = calls.length;
+  await reject(mk({ name: "x" }, { origin: "https://evil.example" }), asOwner, "request_rejected", 403);
+  await reject(mk({ name: "x" }, { "x-repo-board-request": "0" }), asOwner, "request_rejected", 403);
+  await reject(mk({ name: "x" }), async () => ({ sub: "s", email: "wife@example.com" }), "not_allowed", 403);
+  await reject(mk({ name: "x" }), async () => { throw new Error("no jwt"); }, "unauthorized", 401);
+  await reject(mk({ name: "../../etc" }), asOwner, "invalid_repo", 400);
+  assert.equal(calls.length, before, "no GitHub call is made when any check fails");
+  const noWrite = await handleDone(mk({ name: "r" }), env, { authenticate: asOwner, fetcher: gh(403) });
+  assert.equal((await noWrite.json()).error.code, "github_no_write");
+  const already = await handleDone(mk({ name: "r" }), env, { authenticate: asOwner, fetcher: gh(200, "Next step: Done\nUpdated: 2026-11-04\n"), now: () => new Date("2026-11-04T10:00:00Z") });
+  assert.equal((await already.json()).unchanged, true);
+  assert.equal(await handleDone(new Request("https://board.example/"), env, {}), null);
+  console.log("mark done edit and guard checks ok");
 }
