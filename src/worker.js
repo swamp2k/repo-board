@@ -123,6 +123,15 @@ const COLUMNS = [
 ];
 const SHELF = ["done", "dusty", "graveyard"];
 
+const INFO = {
+  needs: "Repos with an open pull request. <b>Decide</b>: the PR has been untouched for 14+ days, so merge it, close it or consciously leave it. <b>Waiting for review</b>: the PR was updated within the last 14 days.",
+  progress: "Repos with a NOW.md that were pushed to within the last 14 days. The card shows <b>Doing</b> and <b>Next step</b> from NOW.md. <b>Mark done</b> copies a prompt that sets Next step to Done.",
+  paused: "Repos with a NOW.md but nothing pushed for more than 14 days. Your note says what you were doing and what comes next. Cards fade the longer they sit.",
+  nobookmark: "Repos with no NOW.md that were pushed to within 30 days. This is a nudge: click <b>Copy prompt</b> and paste it into an agent so it writes a NOW.md (and AGENTS.md / CLAUDE.md) for the repo.",
+  parked: "Out of the way, one click to open. <b>Done</b>: NOW.md Next step says none, nothing outstanding, done or finished. <b>Gathering dust</b>: no NOW.md and untouched for 30+ days. <b>Graveyard</b>: archived repos. To retire a repo, use <b>Retire</b> on its card.",
+};
+const info = (id) => `<button type="button" class="info" popovertarget="info-${id}" aria-label="About this column">i</button><div popover id="info-${id}" class="infobox">${INFO[id]}</div>`;
+
 export function renderBoard(repos, now, t3Enabled = false) {
   const groups = Object.fromEntries(LANES.map(([k]) => [k, []]));
   for (const r of repos) groups[laneFor(r, now)].push(r);
@@ -137,9 +146,9 @@ export function renderBoard(repos, now, t3Enabled = false) {
     const body = keys.length > 1
       ? keys.map((k) => section(k, title[k])).join("")
       : cards(keys[0]);
-    return `<details class="lane lane-${id}" id="${id}" open><summary>${name} <span class="n">${total}</span></summary><div class="cards">${body || `<p class="empty">Nothing here</p>`}</div></details>`;
+    return `<details class="lane lane-${id}" id="${id}" open><summary>${name} <span class="n">${total}</span></summary>${info(id)}<div class="cards">${body || `<p class="empty">Nothing here</p>`}</div></details>`;
   }).join("");
-  const shelf = `<details class="lane lane-parked" id="parked"><summary>Parked <span class="n">${shelfCount}</span></summary><div class="cards">${SHELF.map((k) => section(k, title[k])).join("") || `<p class="empty">Nothing here</p>`}</div></details>`;
+  const shelf = `<details class="lane lane-parked" id="parked"><summary>Parked <span class="n">${shelfCount}</span></summary>${info("parked")}<div class="cards">${SHELF.map((k) => section(k, title[k])).join("") || `<p class="empty">Nothing here</p>`}</div></details>`;
   return strip + columns + shelf;
 }
 
@@ -185,7 +194,7 @@ function card(r, now, t3Enabled = false) {
     </article>`;
   }
 
-  const { prompt, retire } = promptsFor(r);
+  const { prompt, retire, done } = promptsFor(r);
   const warn = prList.length
     ? `<div class="warn">${r.pullRequests.totalCount} open PR${r.pullRequests.totalCount > 1 ? "s" : ""}: decide before retiring</div>` : "";
   const fields = n
@@ -197,7 +206,7 @@ function card(r, now, t3Enabled = false) {
     <header><a href="${esc(r.url)}">${esc(r.name)}</a>${r.isPrivate ? `<span class="tag">private</span>` : ""}</header>
     ${fields}${prs}${warn}
     <footer><span class="age">${days === 0 ? "today" : days + " d ago"}</span>
-    <span class="btns">${t3Mode !== "disabled" && r.id && (t3Mode !== "live" || (r.owner?.login === "swamp2k" && r.name === "glb-viewer")) ? `<button class="ghost" data-t3-repo="${esc(r.id)}" data-t3-name="${esc(r.owner?.login || "")}/${esc(r.name)}" data-t3-url="${esc(r.url)}" data-t3-prompt="${esc(t3InspectionPrompt(r))}" data-t3-now="${esc([n?.doing, n?.state, n?.["next step"]].filter(Boolean).join(" · ") || "No NOW.md status available")}" data-t3-has-now="${r.now ? "yes" : "no"}">${t3Mode === "live" ? "T3 conversations" : "Run in T3"}</button>` : ""}<button class="ghost" data-p="${esc(retire)}" data-l="Retire">Retire</button>
+    <span class="btns">${t3Mode !== "disabled" && r.id && (t3Mode !== "live" || (r.owner?.login === "swamp2k" && r.name === "glb-viewer")) ? `<button class="ghost" data-t3-repo="${esc(r.id)}" data-t3-name="${esc(r.owner?.login || "")}/${esc(r.name)}" data-t3-url="${esc(r.url)}" data-t3-prompt="${esc(t3InspectionPrompt(r))}" data-t3-now="${esc([n?.doing, n?.state, n?.["next step"]].filter(Boolean).join(" · ") || "No NOW.md status available")}" data-t3-has-now="${r.now ? "yes" : "no"}">${t3Mode === "live" ? "T3 conversations" : "Run in T3"}</button>` : ""}${r.now && !isDone(r.now) ? `<button class="ghost" data-p="${esc(done)}" data-l="Mark done">Mark done</button>` : ""}<button class="ghost" data-p="${esc(retire)}" data-l="Retire">Retire</button>
     <button data-p="${esc(prompt)}" data-l="Copy prompt">Copy prompt</button></span></footer>
   </article>`;
 }
@@ -208,7 +217,8 @@ export function promptsFor(r) {
     ? 'Read NOW.md and continue from "Next step". Update NOW.md before ending the session.'
     : 'Inspect the README, code, recent commits and open pull requests. Summarise the current state and suggest the next concrete action. Check whether NOW.md already exists in the repository root; read and update it if present, preserving relevant content, and create it only if missing. Use these fields: Doing, State, Next step, Blocked by, Updated (YYYY-MM-DD). Base it on verified findings; mark anything uncertain. Keep NOW.md current as work progresses. Commit and push the bookmark and instruction changes following the repository workflow (use a branch and PR if required), so they are available on GitHub. Present your findings and proposed next action, then wait for my direction before implementing further changes.');
   const retire = `Retire the repo ${OWNER}/${r.name}. First list its open pull requests and ask me what to do with each (merge, close, or leave) before doing anything. Then ask me for a one-line epitaph, write it to NOW.md as "Epitaph: <text>", commit, and archive the repo on GitHub.`;
-  return { prompt, retire, inspectionPrompt: inspectionPrompt(r) };
+  const done = `Mark ${repoSubject(r, OWNER)} as done. Read NOW.md and change only these lines: set "Next step: Done", set "Doing" to one line saying what was finished, and set "Updated" to today (YYYY-MM-DD). Keep every other line. If there are open pull requests, list them and ask me what to do with each before changing anything. Commit and push following the repository workflow. Do nothing else.`;
+  return { prompt, retire, done, inspectionPrompt: inspectionPrompt(r) };
 }
 
 function inspectionPrompt(r) {
@@ -238,7 +248,7 @@ export function page(inner, t3Enabled = false) {
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,sans-serif}
 h1{font-size:18px;margin:16px}h1 a{font-size:13px;color:var(--mut);margin-left:8px}
 main{display:flex;flex-wrap:wrap;gap:12px;overflow-x:auto;padding:0 16px 24px;align-items:flex-start}
-.lane{flex:0 0 300px;background:color-mix(in srgb,var(--line) 40%,transparent);border-radius:10px;padding:8px}
+.lane{position:relative;flex:0 0 300px;background:color-mix(in srgb,var(--line) 40%,transparent);border-radius:10px;padding:8px}
 summary{font-weight:600;cursor:pointer;padding:4px}.n{color:var(--mut);font-weight:400}
 .cards{display:flex;flex-direction:column;gap:8px;margin-top:6px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px;
@@ -251,7 +261,7 @@ summary{font-weight:600;cursor:pointer;padding:4px}.n{color:var(--mut);font-weig
 button{background:var(--acc);color:#fff;border:0;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer}
 .btns{display:flex;flex-wrap:wrap;gap:6px}.card footer{flex-wrap:wrap;gap:6px}.ghost{background:transparent;color:var(--mut);border:1px solid var(--line)}
 .warn{font-size:12px;color:var(--acc);margin-top:6px}
-.lane-needs summary{color:var(--acc)}.sub{font-size:13px;color:var(--mut);margin:8px 0 0}.strip{flex:0 0 100%;font-size:13px;color:var(--mut)}.strip a{color:var(--ink)}.grave{opacity:.6}.grave header a{text-decoration:line-through}
+.lane-needs summary{color:var(--acc)}.sub{font-size:13px;color:var(--mut);margin:8px 0 0}.info{position:absolute;top:10px;right:10px;width:20px;height:20px;padding:0;border-radius:50%;background:transparent;color:var(--mut);border:1px solid var(--line);font:italic 600 12px/18px Georgia,serif}.infobox{max-width:min(360px,calc(100vw - 32px));margin:auto;padding:14px 16px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);font-size:14px;line-height:1.5;box-shadow:0 10px 30px #0004}.infobox::backdrop{background:#0004}.strip{flex:0 0 100%;font-size:13px;color:var(--mut)}.strip a{color:var(--ink)}.grave{opacity:.6}.grave header a{text-decoration:line-through}
 .empty{color:var(--mut);font-size:13px;margin:4px}.err{margin:16px;color:var(--acc)}
 .t3-backdrop{position:fixed;inset:0;background:#0008;z-index:10}.t3-panel{position:fixed;z-index:11;inset:0 0 0 auto;width:min(520px,100vw);height:100dvh;max-width:100vw;max-height:100dvh;margin:0;overflow:auto;background:var(--bg);color:var(--ink);border:0;border-left:1px solid var(--line);padding:18px;box-shadow:-8px 0 30px #0003}
 .t3-panel h2{font-size:19px;margin:0}.t3-top{display:flex;justify-content:space-between;gap:12px;align-items:start}.t3-muted{color:var(--mut);font-size:13px}.t3-warning{margin:12px 0;padding:8px;border:1px solid var(--acc);border-radius:6px;color:var(--acc)}

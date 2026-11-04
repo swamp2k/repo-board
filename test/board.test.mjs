@@ -38,6 +38,10 @@ assert(/No bookmark yet/.test(html.slice(0, html.indexOf('id="parked"'))), "No b
 assert(html.indexOf('id="parked"') > html.indexOf('id="nobookmark"'));
 assert.equal(laneFor(repo({ now: { text: "Doing: x\nNext step: No outstanding work; await requests" } }), now), "done");
 assert.equal(laneFor(repo({ now: { text: "Doing: x\nNext step: none" } }), now), "done");
+const doneHtml = renderBoard([repo({ name: "active", now: { text: "Doing: a\nNext step: b" } }), repo({ name: "finished", now: { text: "Doing: a\nNext step: none" } })], now);
+assert.equal(doneHtml.split("Mark done</button>").length - 1, 1, "Mark done only on cards that are not done yet and have a NOW.md");
+assert(promptsFor(repo({ name: "x" })).done.includes('set "Next step: Done"') && promptsFor(repo({ name: "x" })).done.includes("Do nothing else"));
+assert(["needs", "progress", "paused", "nobookmark", "parked"].every((id) => doneHtml.includes(`popovertarget="info-${id}"`)), "every column has an info overlay");
 assert.equal(laneFor(repo({ now: { text: "Doing: x\nNext step: Nothing is ready yet, write the spec" } }), now), "progress");
 assert.equal(laneFor(repo({ now: { text: "Doing: x\nNext step: cut a release" } }), now), "progress");
 console.log("all tests passed");
