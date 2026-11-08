@@ -11,7 +11,7 @@ Lanes:
 
 Cards fade the longer they go untouched. "Resume" copies a prompt to paste into Claude Code or Codex.
 
-It only reads from GitHub. It never writes to your repos.
+It only reads from GitHub (and, if you add the token, from Cloudflare). It never writes to your repos.
 
 ## Deploy (once)
 
@@ -20,7 +20,11 @@ It only reads from GitHub. It never writes to your repos.
 2. In this folder:
        npx wrangler deploy
        npx wrangler secret put GITHUB_TOKEN
-3. **Lock it down (important).** The board shows your private repo names and notes.
+3. **Deploy badges (optional).** Cloudflare dashboard → My Profile → API Tokens → Create custom token.
+   Permissions (read-only), this account only: Pages Read, Workers Scripts Read, Workers CI Read. Then:
+       npx wrangler secret put CF_API_TOKEN
+   Each card then shows where its repo is deployed: Git build or by hand. Leave it out and nothing changes.
+4. **Lock it down (important).** The board shows your private repo names and notes.
    Cloudflare dashboard → Zero Trust → Access → Applications → Add self-hosted app
    for the board's address, policy: allow your own email only.
 

@@ -2,5 +2,10 @@ name = "repo-board"
 main = "src/entry.js"
 compatibility_date = "2026-10-01"
 
-# Secret (not in this file): GITHUB_TOKEN
+# Not a secret: the Cloudflare account that the deploy badges read from.
+[vars]
+CF_ACCOUNT_ID = "98b26d7882ddf77fcd45529f35b11202"
+
+# Secrets (not in this file):
 #   npx wrangler secret put GITHUB_TOKEN
+#   npx wrangler secret put CF_API_TOKEN   (optional, read-only, enables the deploy badges)
