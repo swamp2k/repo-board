@@ -1,5 +1,8 @@
 // Repo Board — one card per GitHub repo, sorted into lanes from NOW.md + open PRs.
 // One GitHub GraphQL call per page load (cached 60 s). Read-only.
+// Optional: Cloudflare deploy badges per card (see deploys.js), cached 10 minutes.
+
+import { loadDeploys, deploysFor } from "./deploys.js";
 
 const OWNER = "swamp2k";
 const DAY = 86400000;
@@ -39,13 +42,33 @@ export default {
       });
     }
 
-    const res = new Response(page(renderBoard(repos, Date.now())), {
+    const deploys = await cachedDeploys(env, ctx, url.searchParams.has("refresh"));
+
+    const res = new Response(page(renderBoard(repos, Date.now(), deploys)), {
       headers: { "content-type": "text/html; charset=utf-8", "cache-control": "private, max-age=60" },
     });
     ctx.waitUntil(cache.put(key, res.clone()));
     return res;
   },
 };
+
+// Cloudflare deploy facts change rarely, so they get their own 10 minute cache.
+// Never throws: any problem (no token, API down) just means no badges.
+export async function cachedDeploys(env, ctx, force = false) {
+  try {
+    const cache = caches.default;
+    const key = new Request("https://repo-board.cache/__deploys");
+    if (!force) {
+      const hit = await cache.match(key);
+      if (hit) return await hit.json();
+    }
+    const list = await loadDeploys(env);
+    if (list) ctx.waitUntil(cache.put(key, new Response(JSON.stringify(list), { headers: { "cache-control": "max-age=600" } })));
+    return list;
+  } catch {
+    return null;
+  }
+}
 
 export async function loadRepos(token) {
   if (!token) throw new Error("GITHUB_TOKEN secret is not set");
@@ -95,23 +118,25 @@ const LANES = [
 ];
 const CLOSED = new Set(["dusty", "graveyard"]);
 
-export function renderBoard(repos, now) {
+export function renderBoard(repos, now, deploys) {
   const groups = Object.fromEntries(LANES.map(([k]) => [k, []]));
   for (const r of repos) groups[laneFor(r, now)].push(r);
 
   return LANES.map(([k, title]) => {
     const items = groups[k];
-    const body = items.map((r) => card(r, now)).join("") || `<p class="empty">Nothing here</p>`;
+    const body = items.map((r) => card(r, now, deploys)).join("") || `<p class="empty">Nothing here</p>`;
     const open = CLOSED.has(k) ? "" : " open";
     return `<details class="lane lane-${k}"${open}><summary>${title} <span class="n">${items.length}</span></summary><div class="cards">${body}</div></details>`;
   }).join("");
 }
 
 // Plain data for Nexus (no HTML). Same lanes, same prompts as the web page.
-export function buildBoard(repos, now) {
+// Version 1 plus two additive fields: deploysAvailable and a deploys list on every repo.
+export function buildBoard(repos, now, deploys) {
   return {
     contractVersion: 1,
     generatedAt: new Date(now).toISOString(),
+    deploysAvailable: Array.isArray(deploys),
     lanes: LANES.map(([id, title]) => ({
       id, title,
       repos: repos.filter((r) => laneFor(r, now) === id).map((r) => {
@@ -125,13 +150,23 @@ export function buildBoard(repos, now) {
           openPrs: r.pullRequests.totalCount,
           prs: r.pullRequests.nodes.map((p) => ({ number: p.number, title: p.title, url: p.url, daysSinceUpdate: Math.floor((now - Date.parse(p.updatedAt)) / DAY) })),
           resumePrompt: prompt, retirePrompt: retire,
+          deploys: deploysFor(r.name, deploys, r.pushedAt),
         };
       }),
     })),
   };
 }
 
-function card(r, now) {
+function deployHtml(items, now) {
+  return items.slice(0, 4).map((d) => {
+    const how = d.git ? (d.trigger === "hand" ? "Git, last deploy by hand" : "Git build") : "by hand";
+    const days = d.lastDeploy ? Math.floor((now - Date.parse(d.lastDeploy)) / DAY) : null;
+    const when = days === null ? "never deployed" : days <= 0 ? "today" : days + " d ago";
+    return `<div class="dep"><b>${esc(d.kind)}</b> ${esc(d.project)} · ${how} · ${when}${d.repoNewer ? ` <span class="behind">· repo is newer</span>` : ""}</div>`;
+  }).join("");
+}
+
+function card(r, now, deploys) {
   const days = Math.floor((now - Date.parse(r.pushedAt)) / DAY);
   const n = parseNow(r.now?.text);
   const dust = Math.min(days / 60, 1);
@@ -158,7 +193,7 @@ function card(r, now) {
     : `<div class="f muted">No NOW.md yet</div>`;
   return `<article class="card" style="--dust:${dust.toFixed(2)}">
     <header><a href="${esc(r.url)}">${esc(r.name)}</a>${r.isPrivate ? `<span class="tag">private</span>` : ""}</header>
-    ${fields}${prs}${warn}
+    ${fields}${prs}${deployHtml(deploysFor(r.name, deploys, r.pushedAt), now)}${warn}
     <footer><span class="age">${days === 0 ? "today" : days + " d ago"}</span>
     <span class="btns"><button class="ghost" data-p="${esc(retire)}" data-l="Retire">Retire</button>
     <button data-p="${esc(prompt)}" data-l="Copy prompt">Copy prompt</button></span></footer>
@@ -199,6 +234,7 @@ summary{font-weight:600;cursor:pointer;padding:4px}.n{color:var(--mut);font-weig
 .card footer{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:12px;color:var(--mut)}
 button{background:var(--acc);color:#fff;border:0;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer}
 .btns{display:flex;gap:6px}.ghost{background:transparent;color:var(--mut);border:1px solid var(--line)}
+.dep{font-size:12px;color:var(--mut);margin-top:4px}.dep b{font-weight:500}.behind{color:var(--acc)}
 .warn{font-size:12px;color:var(--acc);margin-top:6px}
 .lane-decide summary{color:var(--acc)}.grave{opacity:.6}.grave header a{text-decoration:line-through}
 .empty{color:var(--mut);font-size:13px;margin:4px}.err{margin:16px;color:var(--acc)}
